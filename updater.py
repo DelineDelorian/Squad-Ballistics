@@ -2,22 +2,25 @@ import os
 import sys
 import requests
 import subprocess
+import zipfile
+import shutil
+import tempfile
 
 from PyQt6.QtWidgets import (
     QMessageBox
 )
 
-CURRENT_VERSION = "1.0.0"
+CURRENT_VERSION = "1.0.2"
 
 VERSION_URL = (
     "https://raw.githubusercontent.com/"
-    "USERNAME/REPO/main/version.txt"
+    "DelineDelorian/Squad-Ballistics/main/version.txt"
 )
 
 EXE_URL = (
     "https://github.com/"
-    "USERNAME/REPO/releases/latest/download/"
-    "SquadBallistics.exe"
+    "DelineDelorian/Squad-Ballistics/releases/latest/download/"
+    "SquadBallistics.zip"
 )
 
 def check_for_updates():
@@ -43,6 +46,7 @@ def check_for_updates():
     return None
 
 def download_update(progress_callback=None):
+
     response = requests.get(
         EXE_URL,
         stream=True
@@ -58,7 +62,7 @@ def download_update(progress_callback=None):
     downloaded = 0
 
     with open(
-        "update.exe",
+        "update.zip",
         "wb"
     ) as f:
 
@@ -77,25 +81,41 @@ def download_update(progress_callback=None):
                 progress_callback(percent)
 
 def apply_update():
-    
+
     if not sys.argv[0].endswith(".exe"):
         return
 
-    current_exe = os.path.basename(
+    current_dir = os.path.dirname(
         sys.argv[0]
     )
 
-    bat = f'''
+    temp_dir = tempfile.mkdtemp()
+
+    with zipfile.ZipFile(
+        "update.zip",
+        "r"
+    ) as zip_ref:
+
+        zip_ref.extractall(temp_dir)
+
+    extracted_folder = os.path.join(
+        temp_dir,
+        "SquadBallistics"
+    )
+
+    bat = f"""
     @echo off
 
     timeout /t 2 /nobreak
 
-    del "{current_exe}"
+    xcopy "{extracted_folder}" "{current_dir}" /E /H /C /I /Y
 
-    rename update.exe "{current_exe}"
+    del "update.zip"
 
-    start "" "{current_exe}"
-    '''
+    start "" "{sys.argv[0]}"
+
+    (goto) 2>nul & del "%~f0"
+    """
 
     with open(
         "update.bat",
