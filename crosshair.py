@@ -1,5 +1,6 @@
 import math
 from PyQt6.QtWidgets import QCheckBox
+from utils import resource_path
 
 import qtawesome as qta
 
@@ -73,8 +74,10 @@ class MainWindow(QMainWindow):
             "Squad Ballistics"
         )
 
-        self.setWindowIcon(
-            QIcon("assets/icon.ico")
+        QIcon(
+            resource_path(
+                "assets/icon.ico"
+            )
         )
 
         self.resize(1400, 850)
