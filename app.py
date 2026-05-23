@@ -1,11 +1,12 @@
 import os
+import sys
 os.environ["QT_LOGGING_RULES"] = "*.debug=false"
 
 import sys
 import json
 
 from PyQt6.QtWidgets import QApplication
-
+from utils import resource_path
 from splash import SplashScreen
 
 from updater import (
@@ -17,7 +18,7 @@ from updater import (
 from crosshair import MainWindow
 
 with open(
-    "weapons.json",
+    resource_path("weapons.json"),
     "r",
     encoding="utf-8"
 ) as f:
