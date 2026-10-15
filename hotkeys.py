@@ -124,3 +124,9 @@ def teardown_hotkeys(window):
         ctypes.windll.user32.UnregisterHotKey(None, hotkey_id)
 
     window._hotkey_ids = []
+
+    event_filter = getattr(window, "_hotkey_filter", None)
+
+    if event_filter is not None:
+        QCoreApplication.instance().removeNativeEventFilter(event_filter)
+        window._hotkey_filter = None

@@ -146,11 +146,38 @@ Weapons live in `weapons.json`. Only `velocity` is required:
 
 ## Development / Разработка
 
+Windows, quick start (downloads the project into `Desktop\Squad-Ballistics`
+and installs everything). Paste into PowerShell:
+
+Windows, быстрый старт (скачает проект в `Рабочий стол\Squad-Ballistics` и
+всё установит). Вставьте в PowerShell:
+
+```powershell
+irm https://raw.githubusercontent.com/DelineDelorian/Squad-Ballistics/refs/heads/claude/trusting-cray-6sbies/tools/get.ps1 | iex
+```
+
+| File | What it does / Что делает |
+|------|---------------------------|
+| `setup.bat` | Installs Python (if missing) and dependencies — установка |
+| `run.bat` | Runs the app from source — запуск без сборки |
+| `build.bat` | Builds and self-checks `dist\SquadBallistics\SquadBallistics.exe` — сборка exe |
+| `test.bat` | Runs the tests — тесты |
+
+Manual / вручную:
+
 ```bash
 pip install -r requirements-dev.txt
-python app.py                  # run from source
-pytest                         # tests (every weapon is checked)
+python app.py                     # run from source
+pytest                            # tests (every weapon is checked)
 pyinstaller SquadBallistics.spec  # build dist/SquadBallistics
 ```
+
+Every push builds the exe on GitHub Actions (**build-windows**, see
+*Artifacts*) without publishing a release. How to publish an update:
+[RELEASING.md](RELEASING.md).
+
+Каждый push собирает exe в GitHub Actions (**build-windows**, раздел
+*Artifacts*) без публикации релиза. Как выпустить обновление:
+[RELEASING.md](RELEASING.md).
 
 User settings are stored in `%APPDATA%\SquadBallistics\config.json`. The old `configs/config.json` is migrated automatically.

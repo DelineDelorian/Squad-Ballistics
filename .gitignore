@@ -9,3 +9,4 @@ update.zip
 update.bat
 .venv/
 venv/
+selftest.log
