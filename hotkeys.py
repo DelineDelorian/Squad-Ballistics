@@ -19,10 +19,24 @@ from PyQt6.QtGui import (
     QKeySequence
 )
 
-# (key name, Windows virtual-key code, MainWindow method)
-HOTKEYS = [
-    ("F8", 0x77, "toggle_overlay"),
-    ("F9", 0x78, "reset_offset"),
+# Bindable keys: name shown in the UI / used by QKeySequence -> Windows VK.
+KEYS = {
+    **{f"F{i}": 0x6F + i for i in range(1, 13)},
+    "Ins": 0x2D,
+    "Home": 0x24,
+    "End": 0x23,
+    "PgUp": 0x21,
+    "PgDown": 0x22,
+    "Pause": 0x13,
+    "ScrollLock": 0x91,
+}
+
+# Actions in UI order; each is a MainWindow method name.
+ACTIONS = [
+    "toggle_overlay",
+    "reset_offset",
+    "distance_up",
+    "distance_down",
 ]
 
 WM_HOTKEY = 0x0312
@@ -55,8 +69,25 @@ class _WindowsHotkeyFilter(QAbstractNativeEventFilter):
         return False, 0
 
 
-def _register_global(window, hotkeys):
-    """Register hotkeys system-wide. Returns the names that failed."""
+def bindings(window):
+    """[(key name, action)] for every bound action."""
+    configured = window.config.get("hotkeys", {})
+
+    result = []
+    used = set()
+
+    for action in ACTIONS:
+        key = configured.get(action, "")
+
+        if key in KEYS and key not in used:
+            used.add(key)
+            result.append((key, action))
+
+    return result
+
+
+def _register_global(window, items):
+    """Register hotkeys system-wide. Returns the bindings that failed."""
     import ctypes
 
     user32 = ctypes.windll.user32
@@ -64,11 +95,11 @@ def _register_global(window, hotkeys):
     callbacks = {}
     failed = []
 
-    for index, (name, vk, method) in enumerate(hotkeys, start=1):
-        if user32.RegisterHotKey(None, index, MOD_NOREPEAT, vk):
-            callbacks[index] = getattr(window, method)
+    for index, (key, action) in enumerate(items, start=1):
+        if user32.RegisterHotKey(None, index, MOD_NOREPEAT, KEYS[key]):
+            callbacks[index] = getattr(window, action)
         else:
-            failed.append((name, vk, method))
+            failed.append((key, action))
 
     if callbacks:
         event_filter = _WindowsHotkeyFilter(callbacks)
@@ -85,19 +116,20 @@ def _register_global(window, hotkeys):
 
 
 def setup_hotkeys(window):
-    local = HOTKEYS
+    items = bindings(window)
+    local = items
 
     if sys.platform == "win32":
         try:
-            local = _register_global(window, HOTKEYS)
+            local = _register_global(window, items)
         except Exception:
-            local = HOTKEYS
+            local = items
 
     window._shortcuts = []
 
-    for name, _vk, method in local:
+    for key, action in local:
         shortcut = QShortcut(
-            QKeySequence(name),
+            QKeySequence(key),
             window
         )
 
@@ -106,13 +138,19 @@ def setup_hotkeys(window):
         )
 
         shortcut.activated.connect(
-            getattr(window, method)
+            getattr(window, action)
         )
 
         window._shortcuts.append(shortcut)
 
 
 def teardown_hotkeys(window):
+    for shortcut in getattr(window, "_shortcuts", []):
+        shortcut.setEnabled(False)
+        shortcut.deleteLater()
+
+    window._shortcuts = []
+
     ids = getattr(window, "_hotkey_ids", [])
 
     if not ids or sys.platform != "win32":

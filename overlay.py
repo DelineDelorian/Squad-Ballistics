@@ -3,7 +3,8 @@ import math
 from PyQt6.QtCore import (
     Qt,
     QTimer,
-    QPointF
+    QPointF,
+    QRectF
 )
 
 from PyQt6.QtGui import (
@@ -11,13 +12,100 @@ from PyQt6.QtGui import (
     QPainter,
     QBrush,
     QPen,
-    QPolygonF
+    QPolygonF,
+    QFont,
+    QGuiApplication
 )
 
-from PyQt6.QtWidgets import (
-    QWidget,
-    QApplication
-)
+from PyQt6.QtWidgets import QWidget
+
+
+def paint_crosshair(painter, cfg, x, y):
+    """Draw the configured crosshair centred on (x, y).
+
+    Shared by the overlay and the preview on the crosshair page.
+    """
+    r, g, b = cfg["color"]
+
+    color = QColor(r, g, b, cfg["opacity"])
+
+    outline = QColor(
+        "black" if cfg.get("outline_color") == "black" else "white"
+    )
+    outline.setAlpha(cfg["opacity"])
+
+    outline_width = cfg["outline_thickness"]
+
+    dot_size = cfg["dot_size"]
+
+    if cfg["glow_enabled"]:
+        painter.setPen(Qt.PenStyle.NoPen)
+
+        for spread, alpha in ((dot_size + 9, 25), (dot_size + 5, 55)):
+            painter.setBrush(QBrush(QColor(r, g, b, min(alpha, cfg["opacity"]))))
+            painter.drawEllipse(QPointF(x, y), spread, spread)
+
+    if cfg["lines_enabled"]:
+        length = cfg["line_length"]
+        gap = cfg["line_gap"]
+
+        lines = [
+            (x, y - gap, x, y - gap - length),
+            (x - gap, y, x - gap - length, y),
+            (x + gap, y, x + gap + length, y),
+        ]
+
+        if not cfg["t_style"]:
+            lines.append((x, y + gap, x, y + gap + length))
+
+        passes = []
+
+        if cfg["outline_enabled"]:
+            passes.append(
+                QPen(
+                    outline,
+                    cfg["line_thickness"] + outline_width * 2,
+                    Qt.PenStyle.SolidLine,
+                    Qt.PenCapStyle.FlatCap
+                )
+            )
+
+        passes.append(
+            QPen(
+                color,
+                cfg["line_thickness"],
+                Qt.PenStyle.SolidLine,
+                Qt.PenCapStyle.FlatCap
+            )
+        )
+
+        for pen in passes:
+            painter.setPen(pen)
+
+            for x1, y1, x2, y2 in lines:
+                painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
+
+    if cfg["circle_enabled"]:
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+
+        radius = cfg["circle_radius"]
+
+        if cfg["outline_enabled"]:
+            painter.setPen(QPen(outline, 2 + outline_width * 2))
+            painter.drawEllipse(QPointF(x, y), radius, radius)
+
+        painter.setPen(QPen(color, 2))
+        painter.drawEllipse(QPointF(x, y), radius, radius)
+
+    if cfg["dot_enabled"]:
+        painter.setBrush(QBrush(color))
+
+        if cfg["outline_enabled"]:
+            painter.setPen(QPen(outline, outline_width))
+        else:
+            painter.setPen(Qt.PenStyle.NoPen)
+
+        painter.drawEllipse(QPointF(x, y), dot_size, dot_size)
 
 
 class Overlay(QWidget):
@@ -25,6 +113,8 @@ class Overlay(QWidget):
         super().__init__()
 
         self.config = config
+
+        self.info_text = ""
 
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
@@ -45,10 +135,6 @@ class Overlay(QWidget):
             Qt.WidgetAttribute.WA_ShowWithoutActivating
         )
 
-        self.setGeometry(
-            QApplication.primaryScreen().geometry()
-        )
-
         self.offset = 0.0
 
         self.target_offset = 0.0
@@ -60,18 +146,38 @@ class Overlay(QWidget):
             self.animate_offset
         )
 
+        self.move_to_screen()
+
         self.show()
+
+    def move_to_screen(self):
+        screens = QGuiApplication.screens()
+
+        index = int(self.config.get("monitor", 0))
+
+        if 0 <= index < len(screens):
+            screen = screens[index]
+        else:
+            screen = QGuiApplication.primaryScreen()
+
+        self.setGeometry(screen.geometry())
+
+        self.update()
 
     @property
     def center_x(self):
-        return self.width() // 2
+        return self.width() / 2 + self.config.get("center_offset_x", 0)
 
     @property
     def center_y(self):
-        return self.height() // 2
+        return self.height() / 2 + self.config.get("center_offset_y", 0)
 
     def screen_width(self):
         return self.width()
+
+    def set_info(self, text):
+        self.info_text = text
+        self.update()
 
     def set_offset(self, value):
         value = float(value)
@@ -125,7 +231,7 @@ class Overlay(QWidget):
         color = QColor(r, g, b, cfg["opacity"])
 
         x = self.center_x
-        y = round(self.center_y + self.offset)
+        y = self.center_y + self.offset
 
         margin = 20
 
@@ -133,122 +239,42 @@ class Overlay(QWidget):
             # The aim point is off-screen (very high angle shot):
             # show an arrow on the edge pointing towards it.
             self.draw_edge_arrow(painter, color, x, y < margin)
-            painter.end()
-            return
+            y = margin + 30 if y < margin else self.height() - margin - 30
+        else:
+            paint_crosshair(painter, cfg, x, y)
 
-        dot_size = cfg["dot_size"]
-
-        if cfg["glow_enabled"]:
-
-            glow = QColor(r, g, b, min(80, cfg["opacity"]))
-
-            painter.setBrush(
-                QBrush(glow)
-            )
-
-            painter.setPen(Qt.PenStyle.NoPen)
-
-            painter.drawEllipse(
-                QPointF(x, y),
-                dot_size + 5,
-                dot_size + 5
-            )
-
-        if cfg["dot_enabled"]:
-
-            painter.setBrush(
-                QBrush(color)
-            )
-
-            if cfg["outline_enabled"]:
-                painter.setPen(
-                    QPen(
-                        QColor("white"),
-                        cfg["outline_thickness"]
-                    )
-                )
-            else:
-                painter.setPen(Qt.PenStyle.NoPen)
-
-            painter.drawEllipse(
-                QPointF(x, y),
-                dot_size,
-                dot_size
-            )
-
-        if cfg["lines_enabled"]:
-
-            painter.setPen(
-                QPen(
-                    color,
-                    cfg["line_thickness"]
-                )
-            )
-
-            length = cfg["line_length"]
-
-            gap = cfg["line_gap"]
-
-            # TOP
-
-            painter.drawLine(
-                x,
-                y - gap,
-                x,
-                y - gap - length
-            )
-
-            # BOTTOM
-
-            if not cfg["t_style"]:
-
-                painter.drawLine(
-                    x,
-                    y + gap,
-                    x,
-                    y + gap + length
-                )
-
-            # LEFT
-
-            painter.drawLine(
-                x - gap,
-                y,
-                x - gap - length,
-                y
-            )
-
-            # RIGHT
-
-            painter.drawLine(
-                x + gap,
-                y,
-                x + gap + length,
-                y
-            )
-
-        if cfg["circle_enabled"]:
-
-            painter.setBrush(
-                Qt.BrushStyle.NoBrush
-            )
-
-            painter.setPen(
-                QPen(
-                    color,
-                    2
-                )
-            )
-
-            radius = cfg["circle_radius"]
-
-            painter.drawEllipse(
-                QPointF(x, y),
-                radius,
-                radius
-            )
+        if cfg.get("info_enabled", True) and self.info_text:
+            self.draw_info(painter, color, x, y)
 
         painter.end()
+
+    def draw_info(self, painter, color, x, y):
+        font = QFont("Segoe UI", 10)
+        font.setBold(True)
+        painter.setFont(font)
+
+        reach = max(
+            self.config["circle_radius"] if self.config["circle_enabled"] else 0,
+            self.config["line_gap"] + self.config["line_length"]
+            if self.config["lines_enabled"] else 0,
+            self.config["dot_size"] + 6
+        )
+
+        rect = QRectF(x + reach + 10, y - 10, 400, 20)
+
+        painter.setPen(QColor(0, 0, 0, 180))
+        painter.drawText(
+            rect.translated(1, 1),
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            self.info_text
+        )
+
+        painter.setPen(color)
+        painter.drawText(
+            rect,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            self.info_text
+        )
 
     def draw_edge_arrow(self, painter, color, x, top):
         size = 14

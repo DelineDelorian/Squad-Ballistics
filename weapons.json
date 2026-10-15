@@ -1,97 +1,460 @@
 {
-    "_comment": "velocity in m/s, gravity = projectile gravity scale (1 = normal). Optional: arc (low/high), unit (deg/mil), angle_offset, deceleration, deceleration_time, min_distance, elevation_limits [min, max], category, note.",
-
-    "MK-19&AGS-17": {
+    "_comment": "velocity m/s, gravity = projectile gravity scale. Optional: acceleration (m/s^2, negative = slows down) + acceleration_time (s), arc low/high, aim overlay/elevation, unit deg/mil, angle_offset, min_distance, elevation_limits [min,max], category, note, note_ru, mod. Sources: in-game values from the official Squad wiki (squad.fandom.com) and SquadCalc (github.com/sh4rkman/SquadCalc).",
+    "M203 / M320 / GP-25 / HK79 / MKE MGL": {
+        "velocity": 76,
+        "gravity": 1,
+        "category": "grenade_launchers",
+        "note": "Under-barrel grenade: arms after ~10 m, a slow and high arc — always enter the height difference.",
+        "note_ru": "Подствольная граната: взводится через ~10 м, медленная и крутая траектория — обязательно указывайте перепад высот."
+    },
+    "QLG10": {
+        "velocity": 78,
+        "gravity": 1,
+        "category": "grenade_launchers",
+        "note": "Under-barrel grenade: arms after ~10 m, a slow and high arc — always enter the height difference.",
+        "note_ru": "Подствольная граната: взводится через ~10 м, медленная и крутая траектория — обязательно указывайте перепад высот."
+    },
+    "Rifle grenade": {
+        "velocity": 75,
+        "gravity": 1,
+        "category": "grenade_launchers",
+        "note": "Under-barrel grenade: arms after ~10 m, a slow and high arc — always enter the height difference.",
+        "note_ru": "Подствольная граната: взводится через ~10 м, медленная и крутая траектория — обязательно указывайте перепад высот."
+    },
+    "MK19 / AGS-17 / AGS-30": {
         "velocity": 230,
         "gravity": 1,
-        "category": "Grenade launchers"
+        "category": "agl",
+        "note": "Fire short bursts and walk the impacts onto the target; minimum arming range ~30 m.",
+        "note_ru": "Стреляйте короткими очередями и подводите разрывы к цели; взведение ~30 м."
+    },
+    "QLZ87": {
+        "velocity": 190,
+        "gravity": 1,
+        "category": "agl",
+        "note": "Fire short bursts and walk the impacts onto the target; minimum arming range ~30 m.",
+        "note_ru": "Стреляйте короткими очередями и подводите разрывы к цели; взведение ~30 м."
     },
     "BTR-4 AGS": {
         "velocity": 190,
         "gravity": 1,
-        "category": "Grenade launchers"
+        "category": "agl",
+        "note": "Fire short bursts and walk the impacts onto the target; minimum arming range ~30 m.",
+        "note_ru": "Стреляйте короткими очередями и подводите разрывы к цели; взведение ~30 м."
     },
-    "M203&GP-25&MKE MGL": {
-        "velocity": 76,
+    "M72A7 LAW / RPG-26": {
+        "velocity": 144,
         "gravity": 1,
-        "category": "Grenade launchers"
+        "category": "launchers"
     },
-    "Rifle Grenade (Both options)": {
-        "velocity": 75,
+    "AT-4": {
+        "velocity": 290,
         "gravity": 1,
-        "category": "Grenade launchers"
+        "category": "launchers"
+    },
+    "MK153 SMAW": {
+        "velocity": 220,
+        "gravity": 1,
+        "category": "launchers"
+    },
+    "PF98 · Tandem": {
+        "velocity": 310,
+        "gravity": 1,
+        "category": "launchers"
+    },
+    "PF98 · HE-I": {
+        "velocity": 220,
+        "gravity": 1,
+        "category": "launchers"
     },
     "RPG-29": {
         "velocity": 280,
         "gravity": 1,
-        "category": "Anti-tank"
+        "category": "launchers"
     },
-    "SPG-9": {
-        "velocity": 435,
-        "gravity": 1.2,
-        "category": "Anti-tank"
+    "RPG-7 · PG-7V HEAT / OG-7V": {
+        "velocity": 117,
+        "gravity": 1,
+        "category": "launchers",
+        "acceleration": 187.5,
+        "acceleration_time": 0.8,
+        "note": "The rocket motor speeds the projectile up after launch; the booster is included in the calculation.",
+        "note_ru": "После выстрела ракета разгоняется двигателем — разгон учтён в расчёте."
     },
-    "ZIS-3": {
-        "velocity": 700,
-        "gravity": 2,
-        "category": "Anti-tank"
+    "RPG-7 · PG-7VR Tandem": {
+        "velocity": 63,
+        "gravity": 1,
+        "category": "launchers",
+        "acceleration": 87.5,
+        "acceleration_time": 0.8,
+        "note": "The rocket motor speeds the projectile up after launch; the booster is included in the calculation.",
+        "note_ru": "После выстрела ракета разгоняется двигателем — разгон учтён в расчёте."
     },
-
-    "Mortar": {
+    "RPG-7V1 · HEAT": {
+        "velocity": 117,
+        "gravity": 1,
+        "category": "launchers",
+        "acceleration": 120,
+        "acceleration_time": 1.5,
+        "note": "The rocket motor speeds the projectile up after launch; the booster is included in the calculation.",
+        "note_ru": "После выстрела ракета разгоняется двигателем — разгон учтён в расчёте."
+    },
+    "Carl Gustav / M3 MAAWS · HEAT": {
         "velocity": 110,
         "gravity": 1,
+        "category": "launchers",
+        "acceleration": 187.5,
+        "acceleration_time": 0.8,
+        "note": "The rocket motor speeds the projectile up after launch; the booster is included in the calculation.",
+        "note_ru": "После выстрела ракета разгоняется двигателем — разгон учтён в расчёте."
+    },
+    "Carl Gustav / M3 MAAWS · Tandem": {
+        "velocity": 63,
+        "gravity": 1,
+        "category": "launchers",
+        "acceleration": 214,
+        "acceleration_time": 0.7,
+        "note": "The rocket motor speeds the projectile up after launch; the booster is included in the calculation.",
+        "note_ru": "После выстрела ракета разгоняется двигателем — разгон учтён в расчёте."
+    },
+    "NLAW": {
+        "velocity": 40,
+        "gravity": 0,
+        "category": "launchers",
+        "acceleration": 350,
+        "acceleration_time": 0.6,
+        "note": "Gravity is disabled for the NLAW in game: no drop, aim straight at the target.",
+        "note_ru": "У NLAW в игре нет гравитации: снаряд летит прямо, целиться прямо в цель."
+    },
+    "SPG-9 · HEAT": {
+        "velocity": 435,
+        "gravity": 1.2,
+        "category": "guns",
+        "note": "HEAT and FRAG shells fly at different speeds — pick the shell you have loaded.",
+        "note_ru": "Кумулятивный и осколочный снаряды летят с разной скоростью — выбирайте заряженный."
+    },
+    "SPG-9 · FRAG": {
+        "velocity": 315,
+        "gravity": 1.2,
+        "category": "guns",
+        "note": "HEAT and FRAG shells fly at different speeds — pick the shell you have loaded.",
+        "note_ru": "Кумулятивный и осколочный снаряды летят с разной скоростью — выбирайте заряженный."
+    },
+    "2A28 Grom (BMP-1 / BMD-1) · HEAT": {
+        "velocity": 435,
+        "gravity": 1.2,
+        "category": "guns",
+        "note": "HEAT and FRAG shells fly at different speeds — pick the shell you have loaded.",
+        "note_ru": "Кумулятивный и осколочный снаряды летят с разной скоростью — выбирайте заряженный."
+    },
+    "2A28 Grom (BMP-1 / BMD-1) · FRAG": {
+        "velocity": 290,
+        "gravity": 1.2,
+        "category": "guns",
+        "note": "HEAT and FRAG shells fly at different speeds — pick the shell you have loaded.",
+        "note_ru": "Кумулятивный и осколочный снаряды летят с разной скоростью — выбирайте заряженный."
+    },
+    "2A70 100mm (BMP-3 / BMD-4 / ZBD04A) · FRAG": {
+        "velocity": 355,
+        "gravity": 2,
+        "category": "guns"
+    },
+    "ZiS-3": {
+        "velocity": 700,
+        "gravity": 2,
+        "category": "guns"
+    },
+    "Tank AP · 2A46 / ZPT98 / 2A20 / M68A2": {
+        "velocity": 1300,
+        "gravity": 2.5,
+        "category": "tanks",
+        "note": "Fast shell, small drop: the correction matters mostly beyond ~800 m.",
+        "note_ru": "Быстрый снаряд, малое падение: поправка важна в основном дальше ~800 м."
+    },
+    "Tank AP · M256 / Rh120": {
+        "velocity": 1200,
+        "gravity": 2.5,
+        "category": "tanks",
+        "note": "Fast shell, small drop: the correction matters mostly beyond ~800 m.",
+        "note_ru": "Быстрый снаряд, малое падение: поправка важна в основном дальше ~800 м."
+    },
+    "Tank AP · L30A1 (Challenger 2)": {
+        "velocity": 1500,
+        "gravity": 2.5,
+        "category": "tanks",
+        "note": "Fast shell, small drop: the correction matters mostly beyond ~800 m.",
+        "note_ru": "Быстрый снаряд, малое падение: поправка важна в основном дальше ~800 м."
+    },
+    "Tank HEAT/HE · M256 / Rh120 / 2A46 / ZPT98 / 2A20 / M68A2": {
+        "velocity": 1100,
+        "gravity": 2,
+        "category": "tanks",
+        "note": "Fast shell, small drop: the correction matters mostly beyond ~800 m.",
+        "note_ru": "Быстрый снаряд, малое падение: поправка важна в основном дальше ~800 м."
+    },
+    "Tank HESH · L30A1 (Challenger 2)": {
+        "velocity": 1000,
+        "gravity": 2,
+        "category": "tanks",
+        "note": "Fast shell, small drop: the correction matters mostly beyond ~800 m.",
+        "note_ru": "Быстрый снаряд, малое падение: поправка важна в основном дальше ~800 м."
+    },
+    "M242 Bushmaster 25mm · AP": {
+        "velocity": 1385,
+        "gravity": 2,
+        "category": "autocannons"
+    },
+    "M242 Bushmaster 25mm · HE": {
+        "velocity": 1000,
+        "gravity": 2,
+        "category": "autocannons"
+    },
+    "2A42 / 2A72 30mm · AP": {
+        "velocity": 1004,
+        "gravity": 2,
+        "category": "autocannons"
+    },
+    "2A42 / 2A72 30mm · HE": {
+        "velocity": 900,
+        "gravity": 2,
+        "category": "autocannons"
+    },
+    "L21A1 RARDEN 30mm · AP": {
+        "velocity": 1300,
+        "gravity": 2,
+        "category": "autocannons"
+    },
+    "L21A1 RARDEN 30mm · HE": {
+        "velocity": 1100,
+        "gravity": 2,
+        "category": "autocannons"
+    },
+    "CTAS40 40mm · AP": {
+        "velocity": 1500,
+        "gravity": 2,
+        "category": "autocannons"
+    },
+    "CTAS40 40mm · GP": {
+        "velocity": 1200,
+        "gravity": 2,
+        "category": "autocannons"
+    },
+    "ZPT99 30mm · AP": {
+        "velocity": 1360,
+        "gravity": 2,
+        "category": "autocannons"
+    },
+    "ZPT99 30mm · HE": {
+        "velocity": 970,
+        "gravity": 2,
+        "category": "autocannons"
+    },
+    "KPVT 14.5mm": {
+        "velocity": 1004,
+        "gravity": 2,
+        "category": "autocannons"
+    },
+    "M2A1 .50": {
+        "velocity": 890,
+        "gravity": 1.5,
+        "category": "hmg"
+    },
+    "NSV": {
+        "velocity": 860,
+        "gravity": 1.5,
+        "category": "hmg"
+    },
+    "DShK-M": {
+        "velocity": 850,
+        "gravity": 1.5,
+        "category": "hmg"
+    },
+    "Mortar (M252 / 2B14 / L16 / Type 63)": {
+        "velocity": 110,
+        "gravity": 1,
+        "category": "indirect",
         "arc": "high",
         "unit": "mil",
         "min_distance": 51,
-        "elevation_limits": [45, 88.875],
-        "category": "Indirect fire",
-        "note": "M252 / 2B14 / L16 / Type 63 mortar"
+        "elevation_limits": [
+            45,
+            88.875
+        ],
+        "note": "Set the mils on the mortar sight. Range ~50–1230 m.",
+        "note_ru": "Выставьте милы на прицеле миномёта. Дальность ~50–1230 м."
     },
     "Technical Mortar": {
         "velocity": 110,
         "gravity": 1,
+        "category": "indirect",
         "arc": "high",
         "angle_offset": 5,
         "min_distance": 51,
-        "elevation_limits": [-45, 135],
-        "category": "Indirect fire",
-        "note": "Angle is the value shown on the technical's elevation readout"
+        "elevation_limits": [
+            -45,
+            135
+        ],
+        "note": "Angle is the value on the technical's elevation readout.",
+        "note_ru": "Угол — значение на шкале возвышения техники."
     },
     "M1064 M121 (120mm)": {
         "velocity": 142,
         "gravity": 1,
+        "category": "indirect",
         "arc": "high",
         "min_distance": 340,
-        "elevation_limits": [-45, 85.3],
-        "category": "Indirect fire"
+        "elevation_limits": [
+            -45,
+            85.3
+        ]
     },
     "Hell Cannon": {
         "velocity": 95,
         "gravity": 1,
+        "category": "indirect",
         "arc": "high",
-        "elevation_limits": [10, 90],
-        "category": "Indirect fire"
+        "elevation_limits": [
+            10,
+            90
+        ],
+        "note": "Set degrees on the elevation scale; the shell is slow — expect a long flight.",
+        "note_ru": "Выставьте градусы на шкале возвышения; снаряд медленный — долгий полёт."
     },
     "UB-32 (S-5 rockets)": {
         "velocity": 300,
         "gravity": 2,
-        "deceleration": 50,
-        "deceleration_time": 2,
-        "elevation_limits": [-25, 35],
-        "category": "Indirect fire"
+        "category": "indirect",
+        "aim": "elevation",
+        "acceleration": -50,
+        "acceleration_time": 2,
+        "elevation_limits": [
+            -25,
+            35
+        ],
+        "note": "Rockets slow down during the first 2 s; fire in salvos and correct by the impacts.",
+        "note_ru": "Ракеты тормозят первые 2 с; стреляйте залпами и корректируйте по разрывам."
     },
     "Technical UB-32": {
         "velocity": 300,
         "gravity": 2,
-        "deceleration": 50,
-        "deceleration_time": 2,
-        "elevation_limits": [-45, 135],
-        "category": "Indirect fire"
+        "category": "indirect",
+        "aim": "elevation",
+        "acceleration": -50,
+        "acceleration_time": 2,
+        "elevation_limits": [
+            -45,
+            135
+        ],
+        "note": "Rockets slow down during the first 2 s; fire in salvos and correct by the impacts.",
+        "note_ru": "Ракеты тормозят первые 2 с; стреляйте залпами и корректируйте по разрывам."
     },
     "BM-21 Grad": {
         "velocity": 200,
         "gravity": 2,
-        "elevation_limits": [-45, 135],
-        "category": "Indirect fire"
+        "category": "indirect",
+        "aim": "elevation",
+        "elevation_limits": [
+            -45,
+            135
+        ]
+    },
+    "MO-120 RT · short": {
+        "velocity": 110,
+        "gravity": 1,
+        "category": "mods",
+        "arc": "high",
+        "unit": "mil",
+        "elevation_limits": [
+            45,
+            85.3
+        ],
+        "mod": "SuperMod"
+    },
+    "MO-120 RT · medium": {
+        "velocity": 143.5,
+        "gravity": 1,
+        "category": "mods",
+        "arc": "high",
+        "unit": "mil",
+        "elevation_limits": [
+            45,
+            85.3
+        ],
+        "mod": "SuperMod"
+    },
+    "MO-120 RT · long": {
+        "velocity": 171.5,
+        "gravity": 1,
+        "category": "mods",
+        "arc": "high",
+        "unit": "mil",
+        "elevation_limits": [
+            45,
+            85.3
+        ],
+        "mod": "SuperMod"
+    },
+    "Type 63 MRL": {
+        "velocity": 300,
+        "gravity": 2,
+        "category": "mods",
+        "aim": "elevation",
+        "elevation_limits": [
+            -20,
+            55
+        ],
+        "mod": "SuperMod"
+    },
+    "M109": {
+        "velocity": 225,
+        "gravity": 2,
+        "category": "mods",
+        "aim": "elevation",
+        "mod": "Steel Division"
+    },
+    "M777": {
+        "velocity": 200,
+        "gravity": 2,
+        "category": "mods",
+        "aim": "elevation",
+        "min_distance": 700,
+        "elevation_limits": [
+            15,
+            80
+        ],
+        "mod": "Steel Division"
+    },
+    "HIMARS": {
+        "velocity": 250,
+        "gravity": 2,
+        "category": "mods",
+        "aim": "elevation",
+        "elevation_limits": [
+            -3,
+            84.7
+        ],
+        "mod": "Steel Division"
+    },
+    "TOS-1A": {
+        "velocity": 100,
+        "gravity": 1,
+        "category": "mods",
+        "aim": "elevation",
+        "elevation_limits": [
+            0,
+            80
+        ],
+        "mod": "Steel Division"
+    },
+    "Ural Hell Cannon": {
+        "velocity": 180,
+        "gravity": 2,
+        "category": "mods",
+        "arc": "high",
+        "elevation_limits": [
+            10,
+            85
+        ],
+        "mod": "Steel Division"
     }
 }

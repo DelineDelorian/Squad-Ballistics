@@ -127,15 +127,21 @@ def selftest():
 
         lines = []
 
-        for name, weapon in weapons.items():
-            distance = max(
-                weapon.min_distance + 5,
-                weapon.max_range() * 0.3
-            )
+        from ballistics import solve
 
-            window.weapon_box.setCurrentIndex(
-                window.weapon_box.findData(name)
-            )
+        for name, weapon in weapons.items():
+            # A distance the weapon can reach with its default arc
+            # (some artillery cannot fire flat at short range).
+            for fraction in (0.3, 0.6, 0.85):
+                distance = max(
+                    weapon.min_distance + 5,
+                    min(weapon.max_range() * fraction, 1500)
+                )
+
+                if solve(weapon, distance).reachable:
+                    break
+
+            window.select_weapon(name)
 
             window.distance_entry.setText(f"{distance:.0f}")
 
@@ -147,7 +153,7 @@ def selftest():
 
             if solution is None or not solution.reachable:
                 raise RuntimeError(
-                    f"{name}: {window.details_label.text()}"
+                    f"{name}: {window.status_text()} {window.sub_label.text()}"
                 )
 
             lines.append(

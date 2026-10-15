@@ -1,3 +1,5 @@
+import copy
+import math
 import os
 
 import qtawesome as qta
@@ -5,120 +7,157 @@ import qtawesome as qta
 from PyQt6.QtCore import (
     Qt,
     QSize,
-    QUrl,
     QTimer,
-    QRegularExpression
+    QUrl
 )
 
 from PyQt6.QtGui import (
-    QFont,
-    QIcon,
     QDesktopServices,
-    QRegularExpressionValidator
+    QGuiApplication,
+    QIcon,
+    QPixmap
 )
 
 from PyQt6.QtWidgets import (
-    QMainWindow,
-    QWidget,
-    QVBoxLayout,
-    QHBoxLayout,
-    QLabel,
-    QPushButton,
-    QSlider,
-    QStackedWidget,
-    QFrame,
     QComboBox,
-    QLineEdit,
-    QCheckBox,
-    QScrollArea
+    QFrame,
+    QGridLayout,
+    QHBoxLayout,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget
 )
+
+import theme
 
 from ballistics import (
     solve,
-    screen_offset
+    screen_offset,
+    trajectory
 )
 
 from config import (
+    DEFAULT_CONFIG,
+    config_dir,
     load_config,
     save_config
 )
 
 from hotkeys import (
+    ACTIONS,
+    KEYS,
     setup_hotkeys,
     teardown_hotkeys
 )
 
+from i18n import (
+    LANGUAGES,
+    set_language,
+    tr,
+    weapon_note
+)
+
 from overlay import Overlay
+
+from updater import CURRENT_VERSION
 
 from utils import resource_path
 
+from widgets import (
+    CrosshairPreview,
+    NumberEdit,
+    Segmented,
+    SliderRow,
+    StatTile,
+    Swatches,
+    Toggle,
+    TrajectoryView,
+    WeaponPicker,
+    card,
+    format_angle,
+    label,
+    repolish
+)
+
 SQUADCALC_URL = "https://squadcalc.app/?map=AlBasrah"
 
-ARC_OPTIONS = [
-    ("auto", "Arc: weapon default"),
-    ("low", "Low arc (direct)"),
-    ("high", "High arc (indirect)")
+CROSSHAIR_COLORS = [
+    "#00ff00",
+    "#00ffff",
+    "#ffff00",
+    "#ff00ff",
+    "#ff3030",
+    "#ffffff",
 ]
 
-BUTTON_STYLE = """
-QPushButton {
-    background-color: rgba(35,40,50,220);
-    border-radius: 14px;
-    border: none;
+PRESETS = {
+    "classic": {
+        "dot_enabled": True, "lines_enabled": True, "t_style": False,
+        "circle_enabled": False, "dot_size": 3, "line_length": 14,
+        "line_gap": 6, "line_thickness": 2,
+    },
+    "dot": {
+        "dot_enabled": True, "lines_enabled": False,
+        "circle_enabled": False, "dot_size": 4,
+    },
+    "circle": {
+        "dot_enabled": True, "lines_enabled": False,
+        "circle_enabled": True, "dot_size": 2, "circle_radius": 16,
+    },
+    "t": {
+        "dot_enabled": False, "lines_enabled": True, "t_style": True,
+        "circle_enabled": False, "line_length": 12, "line_gap": 5,
+        "line_thickness": 2,
+    },
+    "cross": {
+        "dot_enabled": False, "lines_enabled": True, "t_style": False,
+        "circle_enabled": False, "line_length": 10, "line_gap": 0,
+        "line_thickness": 2,
+    },
 }
 
-QPushButton:hover {
-    background-color: rgba(55,60,75,220);
-}
-
-QPushButton:checked {
-    background-color: #3b82f6;
-}
-"""
-
-SECONDARY_BUTTON_STYLE = """
-QPushButton {
-    background-color: rgba(35,40,50,220);
-    border: 1px solid #2d3440;
-}
-
-QPushButton:hover {
-    background-color: rgba(55,60,75,220);
-}
-"""
-
-CARD_STYLE = """
-QFrame#card {
-    background-color: rgba(25,30,40,220);
-    border-radius: 20px;
-}
-"""
-
-OK_COLOR = "#00ff88"
-ERROR_COLOR = "#ff5c5c"
-MUTED_COLOR = "#8b93a7"
+DISTANCE_STEPS = [1, 5, 10, 25, 50, 100]
 
 
-def number_validator(allow_negative):
-    sign = "-?" if allow_negative else ""
+def scrolled(widget, width=None):
+    """Wrap a widget in a transparent vertical scroll area."""
+    scroll = QScrollArea()
 
-    return QRegularExpressionValidator(
-        QRegularExpression(rf"^{sign}\d{{0,6}}([.,]\d{{0,3}})?$")
+    scroll.setWidgetResizable(True)
+
+    scroll.setFrameShape(QFrame.Shape.NoFrame)
+
+    scroll.setHorizontalScrollBarPolicy(
+        Qt.ScrollBarPolicy.ScrollBarAlwaysOff
     )
 
+    content = QWidget()
 
-def parse_number(text, name, default=None):
-    text = text.strip().replace(",", ".")
+    content.setObjectName("scrollContent")
 
-    if not text or text in ("-", "."):
-        if default is not None:
-            return default
-        raise ValueError(f"Enter {name}")
+    layout = QVBoxLayout(content)
 
-    try:
-        return float(text)
-    except ValueError:
-        raise ValueError(f"{name.capitalize()} must be a number")
+    layout.setContentsMargins(0, 0, 0, 0)
+
+    layout.addWidget(widget)
+
+    if width:
+        # Room for the scrollbar so the content is never clipped.
+        scroll.setFixedWidth(width + 14)
+
+        layout.setContentsMargins(0, 0, 14, 0)
+
+        layout.addStretch()
+
+    scroll.setWidget(content)
+
+    scroll.viewport().setAutoFillBackground(False)
+
+    return scroll
 
 
 class MainWindow(QMainWindow):
@@ -129,646 +168,741 @@ class MainWindow(QMainWindow):
 
         self.config = load_config()
 
+        set_language(self.config["language"])
+
         self.last_solution = None
+
+        self.browser = None
 
         self.overlay = Overlay(
             self.config
         )
 
         self.save_timer = QTimer(self)
-
         self.save_timer.setSingleShot(True)
-
         self.save_timer.setInterval(400)
-
         self.save_timer.timeout.connect(
             lambda: save_config(self.config)
         )
 
+        self.calc_timer = QTimer(self)
+        self.calc_timer.setSingleShot(True)
+        self.calc_timer.setInterval(120)
+        self.calc_timer.timeout.connect(
+            lambda: self.calculate(show_errors=False)
+        )
+
         setup_hotkeys(self)
 
-        self.setWindowTitle(
-            "Squad Ballistics"
-        )
+        self.setWindowTitle("Squad Ballistics")
 
         icon_path = resource_path("assets/icon.ico")
 
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
 
-        self.resize(1400, 850)
+        self.resize(1180, 780)
 
-        self.setStyleSheet("""
-            QMainWindow {
-                background: qlineargradient(
-                    x1:0,
-                    y1:0,
-                    x2:1,
-                    y2:1,
-                    stop:0 #0b1018,
-                    stop:1 #121826
-                );
-            }
+        self.setMinimumSize(900, 600)
 
-            QWidget {
-                color: white;
-                font-family: Segoe UI;
-                font-size: 14px;
-            }
+        if self.config["main_on_top"]:
+            self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
 
-            QLabel {
-                color: white;
-                background: transparent;
-            }
+        self.build_ui()
 
-            QLineEdit {
-                background-color: rgba(35,40,50,220);
-                border: 1px solid #2d3440;
-                border-radius: 12px;
-                padding: 12px;
-                color: white;
-            }
+    # =========================
+    # LAYOUT
+    # =========================
 
-            QComboBox {
-                background-color: rgba(35,40,50,220);
-                border: 1px solid #2d3440;
-                border-radius: 12px;
-                padding: 12px;
-                color: white;
-            }
+    @property
+    def accent(self):
+        return self.config.get("accent") or theme.ACCENTS[0]
 
-            QComboBox QAbstractItemView {
-                background-color: #1a1f2a;
-                selection-background-color: #3b82f6;
-            }
-
-            QPushButton {
-                background-color: #3b82f6;
-                border: none;
-                border-radius: 12px;
-                padding: 12px;
-                color: white;
-                font-weight: bold;
-            }
-
-            QPushButton:hover {
-                background-color: #2563eb;
-            }
-
-            QSlider::groove:horizontal {
-                height: 6px;
-                background: #252a33;
-                border-radius: 3px;
-            }
-
-            QSlider::handle:horizontal {
-                background: #3b82f6;
-                width: 14px;
-                margin: -5px 0;
-                border-radius: 7px;
-            }
-
-            QCheckBox {
-                spacing: 10px;
-                color: white;
-                font-size: 14px;
-                background: transparent;
-            }
-
-            QCheckBox::indicator {
-                width: 18px;
-                height: 18px;
-            }
-
-            QCheckBox::indicator:unchecked {
-                border-radius: 6px;
-                border: 2px solid #3b82f6;
-                background: transparent;
-            }
-
-            QCheckBox::indicator:checked {
-                border-radius: 6px;
-                border: 2px solid #3b82f6;
-                background: #3b82f6;
-            }
-
-            QScrollArea {
-                background: transparent;
-                border: none;
-            }
-
-            QWidget#scrollContent {
-                background: transparent;
-            }
-
-            QScrollBar:vertical {
-                background: transparent;
-                width: 10px;
-                margin: 4px;
-            }
-
-            QScrollBar::handle:vertical {
-                background: #2d3440;
-                border-radius: 3px;
-                min-height: 30px;
-            }
-
-            QScrollBar::add-line:vertical,
-            QScrollBar::sub-line:vertical,
-            QScrollBar::add-page:vertical,
-            QScrollBar::sub-page:vertical {
-                background: none;
-                height: 0;
-            }
-        """ + CARD_STYLE)
+    def build_ui(self):
+        self.setStyleSheet(theme.stylesheet(self.accent))
 
         root = QWidget()
 
-        self.setCentralWidget(root)
+        root.setObjectName("root")
 
         layout = QHBoxLayout(root)
 
         layout.setContentsMargins(0, 0, 0, 0)
 
+        layout.setSpacing(0)
+
+        self.controls = {}
+
         self.pages = QStackedWidget()
 
-        self.pages.addWidget(self.build_main_page())
+        self.pages.addWidget(self.build_calc_page())
+        self.pages.addWidget(self.build_crosshair_page())
         self.pages.addWidget(self.build_settings_page())
         self.pages.addWidget(self.build_web_page())
 
         layout.addWidget(self.build_sidebar())
         layout.addWidget(self.pages)
 
-        self.update_weapon_info()
+        self.setCentralWidget(root)
 
-    # =========================
-    # SIDEBAR
-    # =========================
+        self.on_weapon_changed(self.picker.current, user=False)
+
+    def rebuild(self):
+        """Recreate the UI (language / accent change), keeping the inputs."""
+        page = self.pages.currentIndex()
+
+        texts = (
+            self.distance_entry.text(),
+            self.height_entry.text(),
+            self.fov_entry.text()
+        )
+
+        self.browser = None
+
+        self.build_ui()
+
+        self.distance_entry.setText(texts[0])
+        self.height_entry.setText(texts[1])
+        self.fov_entry.setText(texts[2])
+
+        self.set_page(page)
+
+        self.recalculate_if_ready()
 
     def build_sidebar(self):
         sidebar = QFrame()
 
-        sidebar.setFixedWidth(70)
+        sidebar.setObjectName("sidebar")
 
-        sidebar.setStyleSheet("""
-            background-color: rgba(15,18,24,240);
-        """)
+        sidebar.setFixedWidth(64)
 
-        sidebar_layout = QVBoxLayout(sidebar)
+        layout = QVBoxLayout(sidebar)
 
-        sidebar_layout.setContentsMargins(
-            10,
-            20,
-            10,
-            20
-        )
+        layout.setContentsMargins(8, 14, 8, 14)
 
-        sidebar_layout.setSpacing(18)
+        layout.setSpacing(8)
 
-        self.sidebar_buttons = []
+        logo_path = resource_path("assets/icon.ico")
 
-        for index, (icon, tooltip) in enumerate([
-            ("fa5s.home", "Ballistics"),
-            ("fa5s.crosshairs", "Crosshair"),
-            ("fa5s.globe", "SquadCalc")
-        ]):
-            btn = QPushButton()
-
-            btn.setIcon(
-                qta.icon(
-                    icon,
-                    color="white"
+        if os.path.exists(logo_path):
+            logo = label("")
+            logo.setPixmap(
+                QPixmap(logo_path).scaled(
+                    32, 32,
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation
                 )
             )
+            logo.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(logo)
+            layout.addSpacing(10)
 
-            btn.setIconSize(
-                QSize(24, 24)
-            )
+        self.nav_buttons = []
 
-            btn.setFixedSize(52, 52)
+        for index, (icon, key) in enumerate([
+            ("fa5s.bullseye", "nav_calc"),
+            ("fa5s.crosshairs", "nav_crosshair"),
+            ("fa5s.sliders-h", "nav_settings"),
+            ("fa5s.map", "nav_web")
+        ]):
+            button = QPushButton()
 
-            btn.setCheckable(True)
+            button.setObjectName("nav")
 
-            btn.setToolTip(tooltip)
+            button.setIcon(qta.icon(icon, color=theme.TEXT))
 
-            btn.setStyleSheet(
-                BUTTON_STYLE
-            )
+            button.setIconSize(QSize(20, 20))
 
-            btn.clicked.connect(
+            button.setFixedSize(48, 44)
+
+            button.setCheckable(True)
+
+            button.setToolTip(tr(key))
+
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+
+            button.clicked.connect(
                 lambda _checked, i=index: self.set_page(i)
             )
 
-            sidebar_layout.addWidget(btn)
+            layout.addWidget(button)
 
-            self.sidebar_buttons.append(btn)
+            self.nav_buttons.append(button)
 
-        sidebar_layout.addStretch()
+        layout.addStretch()
 
-        self.sidebar_buttons[0].setChecked(True)
+        version = label(f"v{CURRENT_VERSION}", "small")
+
+        version.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        layout.addWidget(version)
+
+        self.nav_buttons[0].setChecked(True)
 
         return sidebar
 
     def set_page(self, index):
         self.pages.setCurrentIndex(index)
 
-        for i, btn in enumerate(self.sidebar_buttons):
-            btn.setChecked(i == index)
+        for i, button in enumerate(self.nav_buttons):
+            button.setChecked(i == index)
 
-        if index == 2:
+        if index == 3:
             self.load_web_page()
 
     # =========================
-    # MAIN PAGE
+    # CALCULATOR PAGE
     # =========================
 
-    def make_card(self):
-        card = QFrame()
+    def visible_weapons(self):
+        show_mods = self.config["show_mods"]
 
-        card.setObjectName("card")
+        return {
+            name: weapon
+            for name, weapon in self.weapons.items()
+            if show_mods or not weapon.mod
+        }
 
-        card.setFixedWidth(440)
+    def weapon_groups(self):
+        groups = {}
 
-        card_layout = QVBoxLayout(card)
+        for name, weapon in self.visible_weapons().items():
+            groups.setdefault(weapon.category, []).append(name)
 
-        card_layout.setContentsMargins(
-            24,
-            24,
-            24,
-            24
-        )
+        return list(groups.items())
 
-        return card, card_layout
+    def recent_weapons(self):
+        visible = self.visible_weapons()
 
-    def build_main_page(self):
-        main_page = QWidget()
+        return [
+            name for name in self.config["recent_weapons"]
+            if name in visible
+        ]
 
-        main_layout = QVBoxLayout(main_page)
+    def build_calc_page(self):
+        page = QWidget()
 
-        main_layout.addStretch()
+        layout = QHBoxLayout(page)
 
-        container, container_layout = self.make_card()
+        layout.setContentsMargins(24, 24, 24, 24)
 
-        container_layout.setSpacing(12)
+        layout.setSpacing(18)
 
-        title = QLabel(
-            "BALLISTICS"
-        )
+        layout.addWidget(self.build_target_card(), 0)
+        layout.addWidget(self.build_solution_card(), 1)
 
-        title.setFont(
-            QFont(
-                "Segoe UI",
-                18,
-                QFont.Weight.Bold
-            )
-        )
+        return scrolled(page)
 
-        self.weapon_box = QComboBox()
+    def build_target_card(self):
+        frame, layout = card()
 
-        self.populate_weapons()
+        frame.setFixedWidth(380)
 
-        self.weapon_box.currentIndexChanged.connect(
-            self.on_weapon_changed
-        )
+        layout.addWidget(label(tr("target"), "title"))
 
-        self.weapon_info = QLabel()
+        layout.addWidget(label(tr("weapon").upper(), "section"))
+
+        self.picker = WeaponPicker()
+
+        self.picker.set_data(self.weapon_groups(), self.recent_weapons())
+
+        visible = self.visible_weapons()
+
+        current = self.config["last_weapon"]
+
+        if current not in visible:
+            current = next(iter(visible))
+
+        self.picker.set_current(current, emit=False)
+
+        self.picker.changed.connect(self.on_weapon_changed)
+
+        layout.addWidget(self.picker)
+
+        self.weapon_info = label("", "small")
 
         self.weapon_info.setWordWrap(True)
 
-        self.weapon_info.setStyleSheet(
-            f"color: {MUTED_COLOR}; font-size: 12px;"
+        layout.addWidget(self.weapon_info)
+
+        self.arc_control = Segmented(
+            [
+                ("auto", tr("arc_auto")),
+                ("low", tr("arc_low")),
+                ("high", tr("arc_high"))
+            ],
+            self.config["arc"]
         )
 
-        self.arc_box = QComboBox()
+        self.arc_control.changed.connect(self.on_arc_changed)
 
-        for key, label in ARC_OPTIONS:
-            self.arc_box.addItem(label, key)
+        layout.addWidget(self.arc_control)
 
-        arc_index = self.arc_box.findData(
-            self.config.get("arc", "auto")
+        self.distance_entry = NumberEdit(
+            allow_negative=False,
+            step=self.config["distance_step"]
         )
 
-        self.arc_box.setCurrentIndex(max(0, arc_index))
+        self.height_entry = NumberEdit(allow_negative=True, step=1)
 
-        self.arc_box.currentIndexChanged.connect(
-            self.on_arc_changed
-        )
+        self.height_entry.setPlaceholderText(tr("height_hint"))
 
-        self.distance_entry = QLineEdit()
+        self.fov_entry = NumberEdit(allow_negative=False, step=1)
 
-        self.distance_entry.setPlaceholderText(
-            "Distance to target"
-        )
+        self.fov_entry.setPlaceholderText(tr("fov_hint"))
 
-        self.distance_entry.setValidator(
-            number_validator(allow_negative=False)
-        )
+        self.fov_entry.set_value(self.config["fov"])
 
-        self.height_entry = QLineEdit()
-
-        self.height_entry.setPlaceholderText(
-            "0  (target higher = +, lower = −)"
-        )
-
-        self.height_entry.setValidator(
-            number_validator(allow_negative=True)
-        )
-
-        self.fov_entry = QLineEdit()
-
-        self.fov_entry.setPlaceholderText(
-            "Horizontal FOV (in-game setting / zoomed)"
-        )
-
-        self.fov_entry.setValidator(
-            number_validator(allow_negative=False)
-        )
-
-        self.fov_entry.setText(
-            f"{self.config['fov']:g}"
-        )
-
-        for entry in (
-            self.distance_entry,
-            self.height_entry,
-            self.fov_entry
+        for caption, entry in (
+            (tr("distance"), self.distance_entry),
+            (tr("height"), self.height_entry),
+            (tr("fov"), self.fov_entry)
         ):
+            layout.addWidget(label(caption.upper(), "section"))
+
+            layout.addWidget(entry)
+
+            entry.textEdited.connect(self.on_input_edited)
+
+            entry.stepped.connect(self.calc_timer.start)
+
             entry.returnPressed.connect(lambda: self.calculate())
-
-        calc_btn = QPushButton(
-            "CALCULATE"
-        )
-
-        calc_btn.setFixedHeight(42)
-
-        calc_btn.clicked.connect(
-            lambda: self.calculate()
-        )
-
-        reset_btn = QPushButton(
-            "RESET AIM"
-        )
-
-        reset_btn.setFixedHeight(42)
-
-        reset_btn.setStyleSheet(SECONDARY_BUTTON_STYLE)
-
-        reset_btn.clicked.connect(
-            lambda: self.reset_offset()
-        )
 
         buttons = QHBoxLayout()
 
-        buttons.addWidget(calc_btn, 2)
-        buttons.addWidget(reset_btn, 1)
+        self.calc_button = QPushButton(tr("calculate"))
 
-        self.result_label = QLabel(
-            "Ready"
-        )
+        self.calc_button.clicked.connect(lambda: self.calculate())
 
-        self.result_label.setStyleSheet(f"""
-            color: {OK_COLOR};
-            font-size: 18px;
-            font-weight: bold;
-        """)
+        self.calc_button.setVisible(not self.config["auto_calc"])
 
-        self.details_label = QLabel()
+        reset_button = QPushButton(tr("reset_aim"))
 
-        self.details_label.setWordWrap(True)
+        reset_button.setProperty("flat_style", True)
 
-        self.details_label.setStyleSheet(
-            f"color: {MUTED_COLOR}; font-size: 12px;"
-        )
+        reset_button.clicked.connect(lambda: self.reset_offset())
 
-        hint = QLabel(
-            "F8 — overlay on/off   ·   F9 — reset aim"
-        )
+        buttons.addWidget(self.calc_button, 2)
+        buttons.addWidget(reset_button, 1)
 
-        hint.setStyleSheet(
-            f"color: {MUTED_COLOR}; font-size: 11px;"
-        )
+        layout.addSpacing(4)
+        layout.addLayout(buttons)
 
-        container_layout.addWidget(title)
-        container_layout.addWidget(self.weapon_box)
-        container_layout.addWidget(self.weapon_info)
-        container_layout.addWidget(self.arc_box)
-        for caption, entry in (
-            ("Distance, m", self.distance_entry),
-            ("Height, m", self.height_entry),
-            ("FOV", self.fov_entry)
-        ):
-            container_layout.addLayout(
-                self.labelled_row(caption, entry)
-            )
-        container_layout.addLayout(buttons)
-        container_layout.addWidget(self.result_label)
-        container_layout.addWidget(self.details_label)
-        container_layout.addWidget(hint)
+        layout.addStretch()
 
-        main_layout.addWidget(
-            container,
-            alignment=Qt.AlignmentFlag.AlignCenter
-        )
+        hotkeys = self.config["hotkeys"]
 
-        main_layout.addStretch()
-
-        return main_page
-
-    def labelled_row(self, caption, widget):
-        row = QHBoxLayout()
-
-        label = QLabel(caption)
-
-        label.setFixedWidth(100)
-
-        label.setStyleSheet(f"color: {MUTED_COLOR};")
-
-        row.addWidget(label)
-        row.addWidget(widget)
-
-        return row
-
-    def populate_weapons(self):
-        """Fill the weapon list grouped by category."""
-        groups = {}
-
-        for name, weapon in self.weapons.items():
-            groups.setdefault(weapon.category, []).append(name)
-
-        for category, names in groups.items():
-            if self.weapon_box.count():
-                self.weapon_box.insertSeparator(
-                    self.weapon_box.count()
-                )
-
-            for name in names:
-                self.weapon_box.addItem(name, name)
-
-        last = self.weapon_box.findData(
-            self.config.get("last_weapon", "")
-        )
-
-        if last >= 0:
-            self.weapon_box.setCurrentIndex(last)
-
-    def current_weapon(self):
-        return self.weapons.get(self.weapon_box.currentData())
-
-    def on_weapon_changed(self, *_):
-        weapon = self.current_weapon()
-
-        if weapon is None:
-            return
-
-        self.config["last_weapon"] = weapon.name
-
-        self.schedule_save()
-
-        self.update_weapon_info()
-
-        self.recalculate_if_ready()
-
-    def on_arc_changed(self, *_):
-        self.config["arc"] = self.arc_box.currentData()
-
-        self.schedule_save()
-
-        self.recalculate_if_ready()
-
-    def update_weapon_info(self):
-        weapon = self.current_weapon()
-
-        if weapon is None:
-            self.weapon_info.setText("")
-            return
-
-        parts = [
-            f"{weapon.velocity:g} m/s",
-            f"gravity ×{weapon.gravity:g}",
-            f"max ~{weapon.max_range():.0f} m",
-            f"default: {weapon.arc} arc"
+        hints = [
+            f"{hotkeys[action]} — {tr('hk_' + action)}"
+            for action in ACTIONS
+            if hotkeys.get(action)
         ]
 
+        hint = label("   ·   ".join(hints), "small")
+
+        hint.setWordWrap(True)
+
+        layout.addWidget(hint)
+
+        return frame
+
+    def build_solution_card(self):
+        frame, layout = card()
+
+        header = QHBoxLayout()
+
+        header.addWidget(label(tr("solution"), "title"))
+
+        header.addStretch()
+
+        self.solution_weapon = label("", "small")
+
+        header.addWidget(self.solution_weapon)
+
+        layout.addLayout(header)
+
+        self.big_label = label(tr("ready"), "big")
+
+        self.sub_label = label("", "sub")
+
+        self.sub_label.setWordWrap(True)
+
+        layout.addWidget(self.big_label)
+        layout.addWidget(self.sub_label)
+
+        grid = QGridLayout()
+
+        grid.setSpacing(8)
+
+        self.stats = {}
+
+        for index, key in enumerate([
+            "stat_tof",
+            "stat_apex",
+            "stat_impact",
+            "stat_offset",
+            "stat_velocity",
+            "stat_alt"
+        ]):
+            tile = StatTile(tr(key))
+
+            grid.addWidget(tile, index // 3, index % 3)
+
+            self.stats[key] = tile
+
+        layout.addLayout(grid)
+
+        self.trajectory_view = TrajectoryView(self.accent)
+
+        layout.addWidget(self.trajectory_view, 1)
+
+        layout.addWidget(label(tr("how_to").upper(), "section"))
+
+        self.steps_layout = QVBoxLayout()
+
+        self.steps_layout.setSpacing(6)
+
+        layout.addLayout(self.steps_layout)
+
+        self.note_label = label("", "small")
+
+        self.note_label.setWordWrap(True)
+
+        layout.addWidget(self.note_label)
+
+        return frame
+
+    def current_weapon(self):
+        return self.weapons.get(self.picker.current)
+
+    def select_weapon(self, name):
+        self.picker.set_current(name)
+
+    def on_weapon_changed(self, name, user=True):
+        weapon = self.weapons.get(name)
+
+        if weapon is None:
+            return
+
+        if user:
+            self.config["last_weapon"] = name
+
+            recent = [n for n in self.config["recent_weapons"] if n != name]
+
+            self.config["recent_weapons"] = [name] + recent[:4]
+
+            self.picker.set_data(self.weapon_groups(), self.recent_weapons())
+
+            self.schedule_save()
+
+        self.update_weapon_info(weapon)
+
+        self.solution_weapon.setText(name)
+
+        self.recalculate_if_ready()
+
+    def update_weapon_info(self, weapon):
+        parts = [
+            tr("chip_velocity", v=f"{weapon.velocity:g}"),
+            tr("chip_gravity", g=f"{weapon.gravity:g}"),
+        ]
+
+        max_range = weapon.max_range()
+
+        if math.isinf(max_range):
+            parts.append(tr("chip_range_inf"))
+        elif max_range < 5000:
+            # Beyond that the number is a physics limit, not a useful range.
+            parts.append(tr("chip_range", r=f"{max_range:.0f}"))
+
+        if weapon.has_boost:
+            parts.append(
+                tr(
+                    "chip_boost",
+                    a=weapon.acceleration,
+                    t=weapon.acceleration_time
+                )
+            )
+
         if weapon.min_distance:
-            parts.append(f"min {weapon.min_distance:g} m")
+            parts.append(tr("chip_min", m=f"{weapon.min_distance:g}"))
 
-        text = "  ·  ".join(parts)
+        if weapon.mod:
+            parts.append(tr("chip_mod", mod=weapon.mod))
 
-        if weapon.note:
-            text += f"\n{weapon.note}"
+        self.weapon_info.setText("  ·  ".join(parts))
 
-        self.weapon_info.setText(text)
+    def on_arc_changed(self, key):
+        self.config["arc"] = key
+
+        self.schedule_save()
+
+        self.recalculate_if_ready()
+
+    def on_input_edited(self, *_):
+        if self.config["auto_calc"]:
+            self.calc_timer.start()
 
     def recalculate_if_ready(self):
         if self.distance_entry.text().strip():
             self.calculate(show_errors=False)
 
-    def show_error(self, message):
-        self.result_label.setStyleSheet(f"""
-            color: {ERROR_COLOR};
-            font-size: 18px;
-            font-weight: bold;
-        """)
+    def primary_unit(self, weapon):
+        mode = self.config["unit_mode"]
 
-        self.result_label.setText(message)
+        if mode in ("deg", "mil"):
+            return mode
 
-    def show_result(self, text):
-        self.result_label.setStyleSheet(f"""
-            color: {OK_COLOR};
-            font-size: 18px;
-            font-weight: bold;
-        """)
+        return weapon.unit
 
-        self.result_label.setText(text)
+    def set_big(self, text, error=False):
+        self.big_label.setText(text)
 
-    def calculate(self, show_errors=True):
-        self.details_label.setText("")
+        self.big_label.setProperty("state", "error" if error else "")
 
-        weapon = self.current_weapon()
+        repolish(self.big_label)
+
+    def status_text(self):
+        return self.big_label.text()
+
+    def clear_result(self, text=None, error=False):
+        self.set_big(text or tr("ready"), error)
+
+        self.sub_label.setText("")
+
+        for tile in self.stats.values():
+            tile.set("—")
+
+        self.trajectory_view.clear()
+
+        self.set_steps([])
+
+        self.note_label.setText("")
+
+    def set_steps(self, steps):
+        # Detach the old rows right away; deleteLater alone would leave them
+        # visible until the event loop runs.
+        while self.steps_layout.count():
+            widget = self.steps_layout.takeAt(0).widget()
+
+            if widget is not None:
+                widget.setParent(None)
+                widget.deleteLater()
+
+        for index, text in enumerate(steps, start=1):
+            row = QWidget()
+
+            row_layout = QHBoxLayout(row)
+
+            row_layout.setContentsMargins(0, 0, 0, 0)
+
+            row_layout.setSpacing(10)
+
+            number = label(str(index), "step_num")
+
+            row_layout.addWidget(number, 0, Qt.AlignmentFlag.AlignTop)
+
+            body = label(text)
+
+            body.setWordWrap(True)
+
+            row_layout.addWidget(body, 1)
+
+            self.steps_layout.addWidget(row)
+
+    def read_inputs(self):
+        try:
+            distance = self.distance_entry.value()
+        except ValueError:
+            raise ValueError(tr("bad_number", name=tr("distance")))
+
+        if distance is None:
+            raise ValueError(tr("enter_distance"))
+
+        if distance <= 0:
+            raise ValueError(tr("bad_distance"))
 
         try:
-            if weapon is None:
-                raise ValueError("Select a weapon")
+            height = self.height_entry.value(0.0)
+        except ValueError:
+            raise ValueError(tr("bad_number", name=tr("height")))
 
-            distance = parse_number(
-                self.distance_entry.text(),
-                "distance"
-            )
+        try:
+            fov = self.fov_entry.value()
+        except ValueError:
+            fov = None
 
-            height = parse_number(
-                self.height_entry.text(),
-                "height difference",
-                default=0.0
-            )
+        if fov is None or not 1 <= fov <= 179:
+            raise ValueError(tr("bad_fov"))
 
-            fov = parse_number(
-                self.fov_entry.text(),
-                "FOV"
-            )
+        return distance, height, fov
 
-            if not 1 <= fov <= 179:
-                raise ValueError("FOV must be between 1 and 179")
+    def calculate(self, show_errors=True):
+        weapon = self.current_weapon()
 
-            solution = solve(
-                weapon,
-                distance,
-                height,
-                self.arc_box.currentData()
-            )
+        if weapon is None:
+            return
 
+        try:
+            distance, height, fov = self.read_inputs()
         except ValueError as e:
+            self.last_solution = None
+
+            self.overlay.reset_offset()
+
+            self.overlay.set_info("")
+
             if show_errors:
-                self.show_error(str(e))
+                self.clear_result(str(e), error=True)
+            else:
+                self.clear_result()
+
             return
 
         if self.config["fov"] != fov:
             self.config["fov"] = fov
             self.schedule_save()
 
+        try:
+            solution = solve(
+                weapon,
+                distance,
+                height,
+                self.config["arc"]
+            )
+        except ValueError as e:
+            self.last_solution = None
+            self.overlay.reset_offset()
+            self.overlay.set_info("")
+            self.clear_result(str(e), error=True)
+            return
+
         self.last_solution = solution
 
         if not solution.reachable:
-            self.show_error("Unreachable")
-
-            self.details_label.setText(solution.reason)
-
-            self.overlay.reset_offset()
-
+            self.show_unreachable(weapon, solution)
             return
 
-        self.apply_offset()
+        self.show_solution(weapon, solution, fov)
 
-        if weapon.unit == "mil":
-            self.show_result(
-                f"{solution.mils:.0f} mil   ({solution.angle:.2f}°)"
-            )
+    def show_unreachable(self, weapon, solution):
+        self.overlay.reset_offset()
+
+        self.overlay.set_info("")
+
+        self.clear_result(tr("unreachable"), error=True)
+
+        if solution.reason_code == "out_of_range":
+            text = tr("how_unreachable_range", max=f"{weapon.max_range():.0f}")
+        elif solution.reason_code == "too_close":
+            text = tr("how_unreachable_close", min=f"{weapon.min_distance:g}")
         else:
-            self.show_result(
-                f"{solution.angle:.2f}°   ({solution.mils:.0f} mil)"
+            low, high = weapon.elevation_limits
+            text = tr(
+                "how_unreachable_limit",
+                angle=f"{solution.angle:.1f}",
+                low=f"{low:g}",
+                high=f"{high:g}"
             )
 
-        details = [
-            f"{solution.arc.capitalize()} arc",
-            f"flight {solution.time_of_flight:.1f} s"
-        ]
+        self.sub_label.setText(text)
 
-        other = "high" if solution.arc == "low" else "low"
-
-        if other in solution.alternatives:
-            details.append(
-                f"{other} arc: {solution.alternatives[other]:.2f}°"
-            )
+    def show_solution(self, weapon, solution, fov):
+        unit = self.primary_unit(weapon)
+        other = "deg" if unit == "mil" else "mil"
 
         offset = self.current_offset()
 
-        if abs(offset) > self.overlay.height() / 2:
-            details.append(
-                "aim point is off-screen — use the angle"
+        offscreen = abs(offset) > self.overlay.height() / 2
+
+        self.overlay.set_offset(offset)
+
+        self.overlay.set_info(
+            f"{solution.distance:.0f} m  ·  {format_angle(solution.angle, unit)}"
+        )
+
+        self.set_big(format_angle(solution.angle, unit))
+
+        self.sub_label.setText(format_angle(solution.angle, other))
+
+        s = tr("unit_s")
+        m = tr("unit_m")
+
+        self.stats["stat_tof"].set(f"{solution.time_of_flight:.1f} {s}")
+        self.stats["stat_apex"].set(f"{solution.apex:.0f} {m}")
+        self.stats["stat_impact"].set(f"{solution.impact_angle:.1f}°")
+        self.stats["stat_velocity"].set(
+            f"{solution.velocity:.0f} {tr('unit_mps')}"
+        )
+
+        if offscreen:
+            self.stats["stat_offset"].set(tr("off_screen"))
+        else:
+            self.stats["stat_offset"].set(f"{offset:.0f} {tr('unit_px')}")
+
+        other_arc = "high" if solution.arc == "low" else "low"
+
+        # The other arc only matters for weapons aimed by elevation; for
+        # direct fire it is a useless near-vertical lob.
+        alt = None
+
+        if weapon.aim == "elevation":
+            alt = solution.alternatives.get(other_arc)
+
+        if alt is not None and abs(alt - solution.angle) > 0.01:
+            self.stats["stat_alt"].set(format_angle(alt, unit))
+        else:
+            self.stats["stat_alt"].set("—")
+
+        main_path = trajectory(weapon, solution)
+
+        alt_path = []
+
+        if alt is not None and abs(alt - solution.angle) > 0.01:
+            alt_solution = solve(
+                weapon,
+                solution.distance,
+                solution.height_diff,
+                other_arc
+            )
+            alt_path = trajectory(weapon, alt_solution)
+
+        self.trajectory_view.set_data(
+            main_path,
+            alt_path,
+            (solution.distance, solution.height_diff)
+        )
+
+        angle_text = format_angle(solution.angle, unit)
+
+        tof = f"{solution.time_of_flight:.1f}"
+
+        if weapon.aim == "overlay":
+            if offscreen:
+                steps = [tr("how_overlay_offscreen", angle=angle_text)]
+            else:
+                steps = [
+                    tr("how_overlay_1", angle=angle_text),
+                    tr("how_overlay_2", fov=f"{fov:g}")
+                ]
+
+            steps.append(
+                tr(
+                    "how_tof_moving",
+                    tof=tof,
+                    lead=f"{solution.time_of_flight * 10:.0f}"
+                )
             )
         else:
-            details.append(f"offset {offset:.0f} px")
+            steps = [
+                tr("how_elevation_1"),
+                tr("how_elevation_2", angle=angle_text),
+                tr("how_tof_adjust", tof=tof)
+            ]
 
-        self.details_label.setText("  ·  ".join(details))
+        self.set_steps(steps)
+
+        self.note_label.setText(weapon_note(weapon))
 
     def current_offset(self):
         solution = self.last_solution
@@ -784,16 +918,17 @@ class MainWindow(QMainWindow):
         )
 
     def apply_offset(self):
-        self.overlay.set_offset(self.current_offset())
+        if self.last_solution is not None and self.last_solution.reachable:
+            self.overlay.set_offset(self.current_offset())
 
     def reset_offset(self):
         self.last_solution = None
 
         self.overlay.reset_offset()
 
-        self.show_result("Ready")
+        self.overlay.set_info("")
 
-        self.details_label.setText("")
+        self.clear_result()
 
     def toggle_overlay(self):
         if self.overlay.isVisible():
@@ -801,102 +936,202 @@ class MainWindow(QMainWindow):
         else:
             self.overlay.show()
 
+    def distance_up(self):
+        self.distance_entry.add(self.config["distance_step"])
+        self.calculate(show_errors=False)
+
+    def distance_down(self):
+        self.distance_entry.add(-self.config["distance_step"])
+        self.calculate(show_errors=False)
+
     # =========================
-    # SETTINGS PAGE
+    # CROSSHAIR PAGE
     # =========================
 
-    def build_settings_page(self):
-        settings_page = QWidget()
+    def build_crosshair_page(self):
+        page = QWidget()
 
-        page_layout = QVBoxLayout(settings_page)
+        layout = QHBoxLayout(page)
 
-        page_layout.setContentsMargins(0, 20, 0, 20)
+        layout.setContentsMargins(24, 24, 24, 24)
 
-        scroll = QScrollArea()
+        layout.setSpacing(18)
 
-        scroll.setWidgetResizable(True)
+        settings, settings_layout = card()
 
-        scroll.setHorizontalScrollBarPolicy(
-            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-        )
+        settings_layout.addWidget(label(tr("nav_crosshair"), "title"))
 
-        content = QWidget()
+        settings_layout.addWidget(label(tr("shape").upper(), "section"))
 
-        content.setObjectName("scrollContent")
-
-        content_layout = QVBoxLayout(content)
-
-        settings_container, settings_inner = self.make_card()
-
-        settings_inner.setSpacing(10)
-
-        settings_title = QLabel(
-            "CROSSHAIR"
-        )
-
-        settings_title.setFont(
-            QFont(
-                "Segoe UI",
-                18,
-                QFont.Weight.Bold
-            )
-        )
-
-        settings_inner.addWidget(
-            settings_title
-        )
-
-        for label, key in [
-            ("Center Dot", "dot_enabled"),
-            ("Crosshair Lines", "lines_enabled"),
-            ("T-Style (no bottom line)", "t_style"),
-            ("Circle", "circle_enabled"),
-            ("Dot Outline", "outline_enabled"),
-            ("Glow / Bloom", "glow_enabled"),
-            ("Smooth Animation", "animated")
+        for text, key in [
+            ("opt_dot", "dot_enabled"),
+            ("opt_lines", "lines_enabled"),
+            ("opt_t", "t_style"),
+            ("opt_circle", "circle_enabled"),
         ]:
-            self.add_toggle(settings_inner, label, key)
+            self.add_toggle(settings_layout, tr(text), key)
 
-        self.add_slider(settings_inner, "DOT SIZE", 1, 20, "dot_size")
-        self.add_slider(settings_inner, "OPACITY", 20, 255, "opacity")
-        self.add_slider(settings_inner, "LINE LENGTH", 1, 40, "line_length")
-        self.add_slider(settings_inner, "LINE GAP", 0, 30, "line_gap")
-        self.add_slider(settings_inner, "THICKNESS", 1, 10, "line_thickness")
-        self.add_slider(settings_inner, "OUTLINE", 1, 5, "outline_thickness")
-        self.add_slider(settings_inner, "CIRCLE RADIUS", 5, 80, "circle_radius")
+        settings_layout.addWidget(label(tr("size").upper(), "section"))
 
-        for index, name in enumerate(("RED", "GREEN", "BLUE")):
-            self.add_slider(
-                settings_inner,
-                name,
-                0,
-                255,
-                ("color", index)
-            )
+        for text, key, low, high in [
+            ("sl_dot", "dot_size", 1, 20),
+            ("sl_length", "line_length", 1, 40),
+            ("sl_gap", "line_gap", 0, 30),
+            ("sl_thickness", "line_thickness", 1, 10),
+            ("sl_circle", "circle_radius", 5, 80),
+        ]:
+            self.add_slider(settings_layout, tr(text), key, low, high)
+
+        settings_layout.addWidget(label(tr("effects").upper(), "section"))
+
+        for text, key in [
+            ("opt_outline", "outline_enabled"),
+            ("opt_glow", "glow_enabled"),
+            ("opt_animated", "animated"),
+            ("opt_info", "info_enabled"),
+        ]:
+            self.add_toggle(settings_layout, tr(text), key)
 
         self.add_slider(
-            settings_inner,
-            "OFFSET CALIBRATION %",
-            50,
-            150,
-            "offset_scale",
-            on_change=self.apply_offset
+            settings_layout, tr("sl_outline"), "outline_thickness", 1, 5
         )
 
-        content_layout.addWidget(
-            settings_container,
-            alignment=Qt.AlignmentFlag.AlignHCenter
+        outline_row = QHBoxLayout()
+
+        outline_row.addWidget(label(tr("outline_color")))
+
+        outline_row.addStretch()
+
+        outline_control = Segmented(
+            [("white", tr("white")), ("black", tr("black"))],
+            self.config["outline_color"]
         )
 
-        content_layout.addStretch()
+        outline_control.changed.connect(
+            lambda value: self.set_setting("outline_color", value)
+        )
 
-        scroll.setWidget(content)
+        outline_row.addWidget(outline_control)
 
-        scroll.viewport().setAutoFillBackground(False)
+        settings_layout.addLayout(outline_row)
 
-        page_layout.addWidget(scroll)
+        layout.addWidget(scrolled(settings, 380), 0)
 
-        return settings_page
+        # Preview, presets and color
+        side, side_layout = card()
+
+        side_layout.addWidget(label(tr("preview"), "title"))
+
+        self.preview = CrosshairPreview(self.config)
+
+        side_layout.addWidget(self.preview, 1)
+
+        side_layout.addWidget(label(tr("presets").upper(), "section"))
+
+        presets = QHBoxLayout()
+
+        for key in PRESETS:
+            button = QPushButton(tr(f"preset_{key}"))
+
+            button.setProperty("flat_style", True)
+
+            button.clicked.connect(
+                lambda _checked, k=key: self.apply_preset(k)
+            )
+
+            presets.addWidget(button)
+
+        side_layout.addLayout(presets)
+
+        side_layout.addWidget(label(tr("color").upper(), "section"))
+
+        current_color = "#{:02x}{:02x}{:02x}".format(*self.config["color"])
+
+        swatches = Swatches(CROSSHAIR_COLORS, current_color)
+
+        swatches.picked.connect(self.pick_crosshair_color)
+
+        side_layout.addWidget(swatches)
+
+        for index, name in enumerate(("R", "G", "B")):
+            self.add_slider(
+                side_layout, name, ("color", index), 0, 255
+            )
+
+        self.add_slider(side_layout, tr("sl_opacity"), "opacity", 20, 255)
+
+        layout.addWidget(side, 1)
+
+        return page
+
+    def add_toggle(self, layout, text, key, on_change=None):
+        toggle = Toggle(text, self.accent, bool(self.get_setting(key)))
+
+        def handle(checked):
+            self.set_setting(key, checked)
+
+            if on_change:
+                on_change(checked)
+
+        toggle.toggled.connect(handle)
+
+        layout.addWidget(toggle)
+
+        self.controls[key] = toggle
+
+        return toggle
+
+    def add_slider(self, layout, text, key, low, high, on_change=None,
+                   suffix=""):
+        row = SliderRow(text, low, high, self.get_setting(key), suffix)
+
+        def handle(value):
+            self.set_setting(key, value)
+
+            if on_change:
+                on_change()
+
+        row.changed.connect(handle)
+
+        layout.addWidget(row)
+
+        self.controls[key] = row
+
+        return row
+
+    def sync_controls(self):
+        for key, control in self.controls.items():
+            value = self.get_setting(key)
+
+            control.blockSignals(True)
+
+            if isinstance(control, Toggle):
+                control.setChecked(bool(value))
+                control.update()
+            elif isinstance(control, SliderRow):
+                control.slider.blockSignals(True)
+                control.slider.setValue(int(value))
+                control.update_label(control.slider.value())
+                control.slider.blockSignals(False)
+
+            control.blockSignals(False)
+
+    def apply_preset(self, key):
+        for name, value in PRESETS[key].items():
+            self.config[name] = value
+
+        self.sync_controls()
+
+        self.refresh_crosshair()
+
+    def pick_crosshair_color(self, color):
+        color = color.lstrip("#")
+
+        self.config["color"] = [int(color[i:i + 2], 16) for i in (0, 2, 4)]
+
+        self.sync_controls()
+
+        self.refresh_crosshair()
 
     def get_setting(self, key):
         if isinstance(key, tuple):
@@ -912,70 +1147,349 @@ class MainWindow(QMainWindow):
         else:
             self.config[key] = value
 
+        self.refresh_crosshair()
+
+    def refresh_crosshair(self):
         self.overlay.update()
+
+        if hasattr(self, "preview"):
+            self.preview.update()
 
         self.schedule_save()
 
-    def add_toggle(self, layout, label, key):
-        checkbox = QCheckBox(label)
+    # =========================
+    # SETTINGS PAGE
+    # =========================
 
-        checkbox.setChecked(bool(self.config[key]))
+    def build_settings_page(self):
+        page = QWidget()
 
-        checkbox.toggled.connect(
-            lambda checked: self.set_setting(key, checked)
+        column = QVBoxLayout(page)
+
+        column.setContentsMargins(24, 24, 24, 24)
+
+        column.setSpacing(18)
+
+        column.addWidget(self.build_interface_card())
+        column.addWidget(self.build_calc_settings_card())
+        column.addWidget(self.build_overlay_card())
+        column.addWidget(self.build_hotkeys_card())
+        column.addWidget(self.build_about_card())
+
+        column.addStretch()
+
+        wrapper = QWidget()
+
+        outer = QHBoxLayout(wrapper)
+
+        outer.setContentsMargins(0, 0, 0, 0)
+
+        page.setMaximumWidth(640)
+
+        outer.addStretch()
+
+        outer.addWidget(page, 1)
+
+        outer.addStretch()
+
+        return scrolled(wrapper)
+
+    def setting_row(self, layout, text, widget):
+        row = QHBoxLayout()
+
+        row.addWidget(label(text))
+
+        row.addStretch()
+
+        row.addWidget(widget)
+
+        layout.addLayout(row)
+
+    def combo(self, items, current, on_change):
+        box = QComboBox()
+
+        for value, text in items:
+            box.addItem(text, value)
+
+        index = box.findData(current)
+
+        box.setCurrentIndex(max(0, index))
+
+        box.setMinimumWidth(180)
+
+        box.currentIndexChanged.connect(
+            lambda _i: on_change(box.currentData())
         )
 
-        layout.addWidget(checkbox)
+        return box
 
-        return checkbox
+    def build_interface_card(self):
+        frame, layout = card()
 
-    def add_slider(
-        self,
-        layout,
-        label,
-        minimum,
-        maximum,
-        key,
-        on_change=None
-    ):
-        header = QHBoxLayout()
+        layout.addWidget(label(tr("s_interface"), "title"))
 
-        name_label = QLabel(label)
+        languages = [("auto", tr("s_lang_auto"))] + list(LANGUAGES.items())
 
-        value_label = QLabel()
-
-        value_label.setStyleSheet(f"color: {MUTED_COLOR};")
-
-        header.addWidget(name_label)
-        header.addStretch()
-        header.addWidget(value_label)
-
-        slider = QSlider(
-            Qt.Orientation.Horizontal
+        self.setting_row(
+            layout,
+            tr("s_language"),
+            self.combo(languages, self.config["language"], self.set_language)
         )
 
-        slider.setRange(minimum, maximum)
+        accent_row = QHBoxLayout()
 
-        value = int(self.get_setting(key))
+        accent_row.addWidget(label(tr("s_accent")))
 
-        slider.setValue(max(minimum, min(maximum, value)))
+        accent_row.addStretch()
 
-        value_label.setText(str(slider.value()))
+        swatches = Swatches(theme.ACCENTS, self.accent)
 
-        def handle(new_value):
-            value_label.setText(str(new_value))
+        swatches.picked.connect(self.set_accent)
 
-            self.set_setting(key, new_value)
+        accent_row.addWidget(swatches)
 
-            if on_change:
-                on_change()
+        layout.addLayout(accent_row)
 
-        slider.valueChanged.connect(handle)
+        self.add_toggle(
+            layout,
+            tr("s_on_top"),
+            "main_on_top",
+            self.set_on_top
+        )
 
-        layout.addLayout(header)
-        layout.addWidget(slider)
+        return frame
 
-        return slider
+    def build_calc_settings_card(self):
+        frame, layout = card()
+
+        layout.addWidget(label(tr("s_calc"), "title"))
+
+        units = Segmented(
+            [
+                ("auto", tr("s_units_auto")),
+                ("deg", tr("s_units_deg")),
+                ("mil", tr("s_units_mil"))
+            ],
+            self.config["unit_mode"]
+        )
+
+        units.changed.connect(self.set_unit_mode)
+
+        self.setting_row(layout, tr("s_units"), units)
+
+        self.setting_row(
+            layout,
+            tr("s_step"),
+            self.combo(
+                [(step, f"{step} m") for step in DISTANCE_STEPS],
+                self.config["distance_step"],
+                self.set_distance_step
+            )
+        )
+
+        self.add_toggle(
+            layout,
+            tr("s_auto_calc"),
+            "auto_calc",
+            lambda checked: self.calc_button.setVisible(not checked)
+        )
+
+        self.add_toggle(
+            layout,
+            tr("s_mods"),
+            "show_mods",
+            lambda _checked: self.refresh_weapon_list()
+        )
+
+        return frame
+
+    def build_overlay_card(self):
+        frame, layout = card()
+
+        layout.addWidget(label(tr("s_overlay"), "title"))
+
+        screens = [
+            (index, f"{index + 1}: {screen.name()} "
+                    f"({screen.geometry().width()}×{screen.geometry().height()})")
+            for index, screen in enumerate(QGuiApplication.screens())
+        ]
+
+        self.setting_row(
+            layout,
+            tr("s_monitor"),
+            self.combo(screens, self.config["monitor"], self.set_monitor)
+        )
+
+        self.add_slider(
+            layout, tr("s_offset_x"), "center_offset_x", -300, 300,
+            suffix=" px"
+        )
+
+        self.add_slider(
+            layout, tr("s_offset_y"), "center_offset_y", -300, 300,
+            suffix=" px"
+        )
+
+        self.add_slider(
+            layout, tr("s_calibration"), "offset_scale", 50, 150,
+            on_change=self.apply_offset, suffix="%"
+        )
+
+        return frame
+
+    def build_hotkeys_card(self):
+        frame, layout = card()
+
+        layout.addWidget(label(tr("s_hotkeys"), "title"))
+
+        keys = [("", tr("hk_none"))] + [(key, key) for key in KEYS]
+
+        for action in ACTIONS:
+            self.setting_row(
+                layout,
+                tr(f"hk_{action}"),
+                self.combo(
+                    keys,
+                    self.config["hotkeys"].get(action, ""),
+                    lambda key, a=action: self.set_hotkey(a, key)
+                )
+            )
+
+        hint = label(tr("s_hotkeys_hint"), "small")
+
+        hint.setWordWrap(True)
+
+        layout.addWidget(hint)
+
+        return frame
+
+    def build_about_card(self):
+        frame, layout = card()
+
+        layout.addWidget(label(tr("s_about"), "title"))
+
+        layout.addWidget(label(tr("s_version", v=CURRENT_VERSION), "muted"))
+
+        row = QHBoxLayout()
+
+        open_button = QPushButton(tr("s_open_config"))
+
+        open_button.setProperty("flat_style", True)
+
+        open_button.clicked.connect(
+            lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(config_dir()))
+        )
+
+        reset_button = QPushButton(tr("s_reset"))
+
+        reset_button.setProperty("flat_style", True)
+
+        reset_button.clicked.connect(self.reset_settings)
+
+        row.addWidget(open_button)
+        row.addWidget(reset_button)
+        row.addStretch()
+
+        layout.addLayout(row)
+
+        return frame
+
+    def set_language(self, code):
+        self.config["language"] = code
+
+        set_language(code)
+
+        self.schedule_save()
+
+        self.rebuild()
+
+    def set_accent(self, color):
+        self.config["accent"] = color
+
+        self.schedule_save()
+
+        self.rebuild()
+
+    def set_on_top(self, checked):
+        self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, checked)
+
+        self.show()
+
+    def set_unit_mode(self, mode):
+        self.config["unit_mode"] = mode
+
+        self.schedule_save()
+
+        self.recalculate_if_ready()
+
+    def set_distance_step(self, step):
+        self.config["distance_step"] = step
+
+        self.distance_entry.step = step
+
+        self.schedule_save()
+
+    def set_monitor(self, index):
+        self.config["monitor"] = index
+
+        self.overlay.move_to_screen()
+
+        self.schedule_save()
+
+        self.recalculate_if_ready()
+
+    def set_hotkey(self, action, key):
+        teardown_hotkeys(self)
+
+        # A key can only do one thing.
+        for other, bound in self.config["hotkeys"].items():
+            if key and bound == key and other != action:
+                self.config["hotkeys"][other] = ""
+
+        self.config["hotkeys"][action] = key
+
+        setup_hotkeys(self)
+
+        self.schedule_save()
+
+        self.rebuild()
+
+    def refresh_weapon_list(self):
+        visible = self.visible_weapons()
+
+        self.picker.set_data(self.weapon_groups(), self.recent_weapons())
+
+        if self.picker.current not in visible:
+            self.picker.set_current(next(iter(visible)))
+
+    def reset_settings(self):
+        answer = QMessageBox.question(
+            self,
+            "Squad Ballistics",
+            tr("s_reset_confirm")
+        )
+
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+
+        teardown_hotkeys(self)
+
+        # The overlay keeps a reference to this dict, so update it in place.
+        self.config.clear()
+
+        self.config.update(copy.deepcopy(DEFAULT_CONFIG))
+
+        set_language(self.config["language"])
+
+        setup_hotkeys(self)
+
+        self.overlay.move_to_screen()
+
+        self.set_on_top(False)
+
+        save_config(self.config)
+
+        self.rebuild()
 
     def schedule_save(self):
         self.save_timer.start()
@@ -985,20 +1499,13 @@ class MainWindow(QMainWindow):
     # =========================
 
     def build_web_page(self):
-        web_page = QWidget()
+        page = QWidget()
 
-        self.web_layout = QVBoxLayout(web_page)
+        self.web_layout = QVBoxLayout(page)
 
-        self.web_layout.setContentsMargins(
-            20,
-            20,
-            20,
-            20
-        )
+        self.web_layout.setContentsMargins(16, 16, 16, 16)
 
-        self.browser = None
-
-        return web_page
+        return page
 
     def load_web_page(self):
         """Create the embedded browser on first use (it is heavy)."""
@@ -1010,24 +1517,19 @@ class MainWindow(QMainWindow):
         except ImportError:
             self.browser = False
 
-            label = QLabel(
-                "Embedded browser is not available (PyQt6-WebEngine "
-                "is not installed)."
-            )
+            open_button = QPushButton(tr("web_open"))
 
-            open_btn = QPushButton("OPEN SQUADCALC IN BROWSER")
-
-            open_btn.clicked.connect(
+            open_button.clicked.connect(
                 lambda: QDesktopServices.openUrl(QUrl(SQUADCALC_URL))
             )
 
             self.web_layout.addStretch()
             self.web_layout.addWidget(
-                label,
+                label(tr("web_missing"), "muted"),
                 alignment=Qt.AlignmentFlag.AlignCenter
             )
             self.web_layout.addWidget(
-                open_btn,
+                open_button,
                 alignment=Qt.AlignmentFlag.AlignCenter
             )
             self.web_layout.addStretch()
@@ -1035,9 +1537,7 @@ class MainWindow(QMainWindow):
 
         self.browser = QWebEngineView()
 
-        self.browser.load(
-            QUrl(SQUADCALC_URL)
-        )
+        self.browser.load(QUrl(SQUADCALC_URL))
 
         self.web_layout.addWidget(self.browser)
 

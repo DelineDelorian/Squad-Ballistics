@@ -93,56 +93,67 @@ Squad Ballistics предоставляет:
 
 # Usage / Использование
 
-1. Select a weapon, enter the distance to the target and (optionally) the height difference. Target higher than you is `+`, lower is `-`.
-2. Enter your horizontal FOV: the in-game FOV setting, or the zoomed FOV when aiming through a scope.
-3. Press **CALCULATE** or Enter. The overlay moves the aim mark below the screen centre: put the mark on the target and fire.
-4. For high-angle weapons (mortars, Hell Cannon) the aim point is off-screen. Use the elevation shown in the app (degrees and mils).
+1. Pick a weapon (searchable list, recent weapons on top), enter the distance and, optionally, the height difference: target higher `+`, lower `-`.
+2. Enter your horizontal FOV: the in-game setting, or the zoomed FOV when aiming through a scope.
+3. The result updates while you type. The **How to fire** block tells you exactly what to do for the selected weapon.
+4. Direct fire (launchers, grenade launchers, guns): put the overlay mark on the target and fire.
+5. Indirect fire (mortars, Hell Cannon, rockets): set the shown elevation (mils or degrees) on the weapon.
 
-1. Выберите оружие, введите дистанцию до цели и (необязательно) перепад высот: цель выше вас — `+`, ниже — `-`.
-2. Укажите горизонтальный FOV: значение из настроек игры или FOV в прицеле, если стреляете через оптику.
-3. Нажмите **CALCULATE** или Enter. Метка оверлея сместится вниз от центра экрана: наведите метку на цель и стреляйте.
-4. Для навесного огня (миномёты, Hell Cannon) точка прицеливания за пределами экрана, используйте угол из программы (градусы и милы).
+1. Выберите оружие (поиск по списку, недавние сверху), введите дистанцию и при необходимости перепад высот: цель выше `+`, ниже `-`.
+2. Укажите горизонтальный FOV: значение из настроек игры или FOV прицела при стрельбе через оптику.
+3. Результат пересчитывается при вводе. Блок **«Как стрелять»** говорит, что делать для выбранного оружия.
+4. Прямая наводка (гранатомёты, пушки): совместите метку оверлея с целью и стреляйте.
+5. Навесной огонь (миномёты, Hell Cannon, ракеты): выставьте показанный угол (милы или градусы) на орудии.
 
-| Hotkey | Action / Действие |
-|--------|-------------------|
+Tips / Советы: the mouse wheel over a field changes the value (Shift ×0.1, Ctrl ×10). / Колесо мыши над полем меняет значение (Shift ×0.1, Ctrl ×10).
+
+| Hotkey (default) | Action / Действие |
+|------------------|-------------------|
 | F8 | Show / hide overlay — показать / скрыть оверлей |
-| F9 | Reset aim mark to centre — вернуть метку в центр |
+| F9 | Reset aim mark — сбросить метку |
+| — | Distance + / − (bind in Settings) — дистанция + / − (назначается в настройках) |
 
-On Windows the hotkeys are global, so they work while the game is focused. / В Windows горячие клавиши глобальные и работают поверх игры.
+Hotkeys can be changed in **Settings**. On Windows they are global, so they work while the game is focused. / Клавиши меняются в **Настройках**. В Windows они глобальные и работают поверх игры.
 
-If the mark is slightly off in your setup, adjust **OFFSET CALIBRATION %** on the crosshair page. / Если метка немного не совпадает, подстройте **OFFSET CALIBRATION %** на странице прицела.
+If the mark is slightly off in your setup, adjust **Offset calibration** in Settings. / Если метка немного не совпадает, подстройте **Калибровку смещения** в настройках.
+
+## Features / Возможности
+
+* 52 standard weapons in 8 groups plus 7 popular mod weapons (hidden by default). / 52 стандартных вида оружия в 8 группах и 7 модовых (по умолчанию скрыты).
+* Rocket boost and slow-down phases (RPG-7, Carl Gustav, NLAW, UB-32). / Учёт разгона и торможения ракет.
+* Trajectory view, flight time, apex, impact angle, lead for moving targets. / График траектории, время полёта, высота подъёма, угол падения, упреждение.
+* Crosshair page with live preview, presets, color swatches, outline and glow. / Прицел с живым предпросмотром, пресетами, палитрой, обводкой и свечением.
+* Russian / English interface, accent colors, monitor choice, overlay center offset, label next to the mark. / Русский и английский интерфейс, цвет акцента, выбор монитора, смещение центра, подпись у метки.
 
 ## How it works / Как считается
 
-* No air drag, gravity `9.78 m/s² × gravity scale` of the weapon (the same model as SquadCalc). UB-32 rockets use the deceleration phase.
+* No air drag, gravity `9.78 m/s² × gravity scale` of the weapon. Rocket boost/slow-down is folded into the equivalent velocity over the distance.
 * Elevation: `θ = atan((v² ∓ √(v⁴ − g(g·d² + 2·h·v²))) / (g·d))`, low or high arc.
 * Screen offset: rectilinear projection, `offset = (screen_width / 2) / tan(FOV / 2) × tan(θ)`, so it works on any resolution.
+* Data: in-game values from the [official Squad wiki](https://squad.fandom.com/wiki/Weapons) and [SquadCalc](https://github.com/sh4rkman/SquadCalc). After a game patch, edit `weapons.json`.
 
 ## Weapons database / База оружия
 
 Weapons live in `weapons.json`. Only `velocity` is required:
 
 ```json
-"SPG-9": {
-    "velocity": 435,
-    "gravity": 1.2,
-    "arc": "low",
-    "unit": "deg",
-    "min_distance": 0,
-    "elevation_limits": [-90, 90],
-    "angle_offset": 0,
-    "deceleration": 0,
-    "deceleration_time": 0,
-    "category": "Anti-tank",
-    "note": ""
+"RPG-7 · PG-7V HEAT / OG-7V": {
+    "velocity": 117,
+    "gravity": 1,
+    "acceleration": 187.5,
+    "acceleration_time": 0.8,
+    "category": "launchers",
+    "note": "English tip",
+    "note_ru": "Подсказка"
 }
 ```
 
-* `gravity`: projectile gravity scale (1 = normal).
-* `arc`: default trajectory, `low` or `high`.
+* `gravity`: projectile gravity scale (1 = normal, 0 = no drop).
+* `acceleration` / `acceleration_time`: rocket motor phase in m/s² and seconds (negative = slows down, UB-32).
+* `arc`: default trajectory, `low` or `high`; `aim`: `overlay` (direct fire) or `elevation` (set the angle on the weapon).
 * `unit`: `mil` shows mils first (mortars).
-* `angle_offset`: subtracted from the elevation, for weapons whose elevation readout is shifted (technical mortar).
-* `deceleration` / `deceleration_time`: rocket slow-down phase (UB-32).
+* `angle_offset`: subtracted from the elevation, for weapons whose readout is shifted (technical mortar).
+* `min_distance`, `elevation_limits` `[min, max]`, `category`, `mod`.
 
 ## Development / Разработка
 

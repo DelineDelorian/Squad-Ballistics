@@ -44,7 +44,34 @@ DEFAULT_CONFIG = {
     "offset_scale": 100,
 
     "last_weapon": "",
-    "arc": "auto"
+    "recent_weapons": [],
+    "arc": "auto",
+
+    "outline_color": "white",
+    "info_enabled": True,
+
+    # Overlay placement
+    "monitor": 0,
+    "center_offset_x": 0,
+    "center_offset_y": 0,
+
+    # Interface
+    "language": "auto",
+    "accent": "#3b82f6",
+    "main_on_top": False,
+
+    # Calculator
+    "unit_mode": "auto",
+    "auto_calc": True,
+    "show_mods": False,
+    "distance_step": 25,
+
+    "hotkeys": {
+        "toggle_overlay": "F8",
+        "reset_offset": "F9",
+        "distance_up": "",
+        "distance_down": ""
+    }
 }
 
 
@@ -82,6 +109,18 @@ def _merge(loaded):
                 and all(isinstance(c, (int, float)) for c in value)
             ):
                 config[key] = [max(0, min(255, int(c))) for c in value]
+            continue
+
+        if key == "hotkeys":
+            if isinstance(value, dict):
+                for action in default:
+                    if isinstance(value.get(action), str):
+                        config[key][action] = value[action]
+            continue
+
+        if key == "recent_weapons":
+            if isinstance(value, list):
+                config[key] = [v for v in value if isinstance(v, str)][:5]
             continue
 
         if isinstance(default, bool):

@@ -65,3 +65,19 @@ def test_legacy_config_migrated(tmp_path, monkeypatch):
 
     assert config.load_config(str(path))["fov"] == 100
     assert json.loads(path.read_text())["fov"] == 100
+
+
+def test_hotkeys_merged(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    path = tmp_path / "config.json"
+    path.write_text(json.dumps({
+        "hotkeys": {"distance_up": "PgUp", "toggle_overlay": 5},
+        "recent_weapons": ["a", 3, "b"],
+    }))
+
+    cfg = config.load_config(str(path))
+
+    assert cfg["hotkeys"]["distance_up"] == "PgUp"
+    assert cfg["hotkeys"]["toggle_overlay"] == "F8"
+    assert cfg["hotkeys"]["reset_offset"] == "F9"
+    assert cfg["recent_weapons"] == ["a", "b"]

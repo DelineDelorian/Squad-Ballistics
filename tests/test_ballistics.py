@@ -13,6 +13,7 @@ from ballistics import (
     parse_weapons,
     screen_offset,
     solve,
+    trajectory,
 )
 
 from conftest import ROOT
@@ -21,18 +22,29 @@ WEAPONS = load_weapons(os.path.join(ROOT, "weapons.json"))
 
 
 def test_database_loads():
-    assert len(WEAPONS) >= 6
+    assert len(WEAPONS) >= 50
 
-    # Weapons shipped with the original release must still be present.
+    # Weapons of the original release must still be covered.
     for name in (
-        "MK-19&AGS-17",
+        "MK19 / AGS-17 / AGS-30",
         "RPG-29",
-        "SPG-9",
-        "ZIS-3",
-        "Rifle Grenade (Both options)",
-        "M203&GP-25&MKE MGL",
+        "SPG-9 · HEAT",
+        "ZiS-3",
+        "Rifle grenade",
+        "M203 / M320 / GP-25 / HK79 / MKE MGL",
     ):
         assert name in WEAPONS
+
+    # Original values are kept.
+    assert WEAPONS["SPG-9 · HEAT"].gravity == 1.2
+    assert WEAPONS["ZiS-3"].velocity == 700
+
+
+def test_every_weapon_has_known_category():
+    from i18n import STRINGS
+
+    for weapon in WEAPONS.values():
+        assert f"cat_{weapon.category}" in STRINGS, weapon.name
 
 
 @pytest.mark.parametrize("name", list(WEAPONS))
@@ -43,7 +55,7 @@ def test_every_weapon_hits_target(name, fraction, height):
 
     distance = max(
         weapon.min_distance + 1,
-        weapon.max_range() * fraction
+        min(weapon.max_range() * fraction, 2000)
     )
 
     for arc in ("low", "high"):
@@ -70,9 +82,15 @@ def test_every_weapon_hits_target(name, fraction, height):
 def test_default_arc_reachable_somewhere(name):
     weapon = WEAPONS[name]
 
-    distance = max(weapon.min_distance + 1, weapon.max_range() * 0.5)
+    for fraction in (0.3, 0.6, 0.85):
+        distance = max(
+            weapon.min_distance + 1,
+            min(weapon.max_range() * fraction, 2000)
+        )
+        if solve(weapon, distance).reachable:
+            return
 
-    assert solve(weapon, distance).reachable, name
+    pytest.fail(f"{name} is never reachable with its default arc")
 
 
 def test_gravity_scale_is_used():
@@ -96,7 +114,7 @@ def test_known_value():
 
 
 def test_high_arc_is_higher():
-    weapon = WEAPONS["Mortar"]
+    weapon = WEAPONS["Mortar (M252 / 2B14 / L16 / Type 63)"]
 
     solution = solve(weapon, 800)
 
@@ -106,7 +124,7 @@ def test_high_arc_is_higher():
 
 
 def test_out_of_range():
-    weapon = WEAPONS["M203&GP-25&MKE MGL"]
+    weapon = WEAPONS["M203 / M320 / GP-25 / HK79 / MKE MGL"]
 
     solution = solve(weapon, weapon.max_range() + 50)
 
@@ -115,7 +133,7 @@ def test_out_of_range():
 
 
 def test_min_distance():
-    weapon = WEAPONS["Mortar"]
+    weapon = WEAPONS["Mortar (M252 / 2B14 / L16 / Type 63)"]
 
     solution = solve(weapon, 20)
 
@@ -124,7 +142,7 @@ def test_min_distance():
 
 
 def test_target_above_needs_more_elevation():
-    weapon = WEAPONS["SPG-9"]
+    weapon = WEAPONS["SPG-9 · HEAT"]
 
     assert solve(weapon, 600, 30).angle > solve(weapon, 600, 0).angle
     assert solve(weapon, 600, -30).angle < solve(weapon, 600, 0).angle
@@ -133,7 +151,7 @@ def test_target_above_needs_more_elevation():
 @pytest.mark.parametrize("distance", [0, -10, float("nan")])
 def test_invalid_distance(distance):
     with pytest.raises(ValueError):
-        solve(WEAPONS["SPG-9"], distance)
+        solve(WEAPONS["SPG-9 · HEAT"], distance)
 
 
 def test_deceleration_velocity():
@@ -180,6 +198,8 @@ def test_screen_offset_invalid_fov(fov):
     {"x": {"velocity": 0}},
     {"x": {"velocity": "fast"}},
     {"x": {"velocity": 100, "gravity": -1}},
+    {"x": {"velocity": 100, "aim": "telepathy"}},
+    {"x": {"velocity": True}},
     {"x": {"velocity": 100, "arc": "sideways"}},
     {"x": {"velocity": 100, "elevation_limits": [10, 5]}},
     {"x": {"velocity": 100, "deceleration": 100, "deceleration_time": 1}},
@@ -196,3 +216,77 @@ def test_legacy_format_still_works():
 
     assert weapons["Old"].arc == "low"
     assert solve(weapons["Old"], 300).reachable
+
+
+def test_rocket_boost_speeds_up():
+    weapon = WEAPONS["RPG-7 · PG-7V HEAT / OG-7V"]
+
+    assert weapon.velocity_at(1) == pytest.approx(117, abs=1)
+    assert weapon.velocity_at(300) > 117
+    assert weapon.velocity_at(5000) < weapon.cruise_velocity
+    assert weapon.cruise_velocity == pytest.approx(117 + 187.5 * 0.8)
+
+    # Boosted rocket needs less elevation than one without the motor.
+    plain = Weapon("plain", velocity=117)
+    assert solve(weapon, 300).angle < solve(plain, 300).angle
+
+
+def test_boost_max_range_matches_reachability():
+    weapon = WEAPONS["Carl Gustav / M3 MAAWS · HEAT"]
+    limit = weapon.max_range()
+
+    assert solve(weapon, limit * 0.99).reachable
+    assert not solve(weapon, limit * 1.01).reachable
+
+
+def test_no_gravity_flies_straight():
+    weapon = WEAPONS["NLAW"]
+
+    assert weapon.max_range() == math.inf
+    assert solve(weapon, 400).angle == pytest.approx(0)
+    assert solve(weapon, 400, 40).angle == pytest.approx(
+        math.degrees(math.atan2(40, 400))
+    )
+
+
+@pytest.mark.parametrize("name", list(WEAPONS))
+def test_trajectory_ends_on_target(name):
+    weapon = WEAPONS[name]
+
+    for fraction in (0.3, 0.6, 0.85):
+        distance = max(
+            weapon.min_distance + 1,
+            min(weapon.max_range() * fraction, 2000)
+        )
+        solution = solve(weapon, distance, 5)
+        if solution.reachable:
+            break
+    else:
+        pytest.skip("not reachable 5 m above")
+
+    path = trajectory(weapon, solution)
+
+    assert path[0] == (0.0, 0.0)
+    assert path[-1][0] == pytest.approx(distance)
+    assert path[-1][1] == pytest.approx(5, abs=0.01)
+    assert solution.apex >= 5 - 1e-6
+    assert max(y for _, y in path) <= solution.apex + 1e-6
+
+
+def test_impact_angle_and_apex():
+    weapon = Weapon("flat", velocity=100)
+    solution = solve(weapon, 500)
+
+    # Symmetric parabola on flat ground: lands at the launch angle.
+    assert solution.impact_angle == pytest.approx(solution.angle)
+    assert solution.apex == pytest.approx(
+        (100 * math.sin(math.radians(solution.angle))) ** 2 / (2 * GRAVITY)
+    )
+
+
+def test_reason_codes():
+    mortar = WEAPONS["Mortar (M252 / 2B14 / L16 / Type 63)"]
+
+    assert solve(mortar, 10).reason_code == "too_close"
+    assert solve(mortar, 5000).reason_code == "out_of_range"
+    assert solve(mortar, 800, arc="low").reason_code == "elevation_limit"
