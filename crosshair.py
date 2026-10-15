@@ -1,19 +1,20 @@
-import math
-from PyQt6.QtWidgets import QCheckBox
-from utils import resource_path
+import os
 
 import qtawesome as qta
 
 from PyQt6.QtCore import (
     Qt,
     QSize,
-    QUrl
+    QUrl,
+    QTimer,
+    QRegularExpression
 )
 
 from PyQt6.QtGui import (
     QFont,
-    QDoubleValidator,
-    QIcon
+    QIcon,
+    QDesktopServices,
+    QRegularExpressionValidator
 )
 
 from PyQt6.QtWidgets import (
@@ -28,21 +29,36 @@ from PyQt6.QtWidgets import (
     QFrame,
     QComboBox,
     QLineEdit,
-    QMessageBox
+    QCheckBox,
+    QScrollArea
 )
 
-from PyQt6.QtWebEngineWidgets import (
-    QWebEngineView
+from ballistics import (
+    solve,
+    screen_offset
 )
-
-from overlay import Overlay
 
 from config import (
     load_config,
     save_config
 )
 
-from hotkeys import setup_hotkeys
+from hotkeys import (
+    setup_hotkeys,
+    teardown_hotkeys
+)
+
+from overlay import Overlay
+
+from utils import resource_path
+
+SQUADCALC_URL = "https://squadcalc.app/?map=AlBasrah"
+
+ARC_OPTIONS = [
+    ("auto", "Arc: weapon default"),
+    ("low", "Low arc (direct)"),
+    ("high", "High arc (indirect)")
+]
 
 BUTTON_STYLE = """
 QPushButton {
@@ -54,7 +70,56 @@ QPushButton {
 QPushButton:hover {
     background-color: rgba(55,60,75,220);
 }
+
+QPushButton:checked {
+    background-color: #3b82f6;
+}
 """
+
+SECONDARY_BUTTON_STYLE = """
+QPushButton {
+    background-color: rgba(35,40,50,220);
+    border: 1px solid #2d3440;
+}
+
+QPushButton:hover {
+    background-color: rgba(55,60,75,220);
+}
+"""
+
+CARD_STYLE = """
+QFrame#card {
+    background-color: rgba(25,30,40,220);
+    border-radius: 20px;
+}
+"""
+
+OK_COLOR = "#00ff88"
+ERROR_COLOR = "#ff5c5c"
+MUTED_COLOR = "#8b93a7"
+
+
+def number_validator(allow_negative):
+    sign = "-?" if allow_negative else ""
+
+    return QRegularExpressionValidator(
+        QRegularExpression(rf"^{sign}\d{{0,6}}([.,]\d{{0,3}})?$")
+    )
+
+
+def parse_number(text, name, default=None):
+    text = text.strip().replace(",", ".")
+
+    if not text or text in ("-", "."):
+        if default is not None:
+            return default
+        raise ValueError(f"Enter {name}")
+
+    try:
+        return float(text)
+    except ValueError:
+        raise ValueError(f"{name.capitalize()} must be a number")
+
 
 class MainWindow(QMainWindow):
     def __init__(self, weapons):
@@ -64,8 +129,20 @@ class MainWindow(QMainWindow):
 
         self.config = load_config()
 
+        self.last_solution = None
+
         self.overlay = Overlay(
             self.config
+        )
+
+        self.save_timer = QTimer(self)
+
+        self.save_timer.setSingleShot(True)
+
+        self.save_timer.setInterval(400)
+
+        self.save_timer.timeout.connect(
+            lambda: save_config(self.config)
         )
 
         setup_hotkeys(self)
@@ -74,11 +151,10 @@ class MainWindow(QMainWindow):
             "Squad Ballistics"
         )
 
-        QIcon(
-            resource_path(
-                "assets/icon.ico"
-            )
-        )
+        icon_path = resource_path("assets/icon.ico")
+
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
 
         self.resize(1400, 850)
 
@@ -102,6 +178,7 @@ class MainWindow(QMainWindow):
 
             QLabel {
                 color: white;
+                background: transparent;
             }
 
             QLineEdit {
@@ -118,6 +195,11 @@ class MainWindow(QMainWindow):
                 border-radius: 12px;
                 padding: 12px;
                 color: white;
+            }
+
+            QComboBox QAbstractItemView {
+                background-color: #1a1f2a;
+                selection-background-color: #3b82f6;
             }
 
             QPushButton {
@@ -145,10 +227,12 @@ class MainWindow(QMainWindow):
                 margin: -5px 0;
                 border-radius: 7px;
             }
+
             QCheckBox {
                 spacing: 10px;
                 color: white;
                 font-size: 14px;
+                background: transparent;
             }
 
             QCheckBox::indicator {
@@ -167,7 +251,36 @@ class MainWindow(QMainWindow):
                 border: 2px solid #3b82f6;
                 background: #3b82f6;
             }
-        """)
+
+            QScrollArea {
+                background: transparent;
+                border: none;
+            }
+
+            QWidget#scrollContent {
+                background: transparent;
+            }
+
+            QScrollBar:vertical {
+                background: transparent;
+                width: 10px;
+                margin: 4px;
+            }
+
+            QScrollBar::handle:vertical {
+                background: #2d3440;
+                border-radius: 3px;
+                min-height: 30px;
+            }
+
+            QScrollBar::add-line:vertical,
+            QScrollBar::sub-line:vertical,
+            QScrollBar::add-page:vertical,
+            QScrollBar::sub-page:vertical {
+                background: none;
+                height: 0;
+            }
+        """ + CARD_STYLE)
 
         root = QWidget()
 
@@ -177,10 +290,22 @@ class MainWindow(QMainWindow):
 
         layout.setContentsMargins(0, 0, 0, 0)
 
-        # =========================
-        # SIDEBAR
-        # =========================
+        self.pages = QStackedWidget()
 
+        self.pages.addWidget(self.build_main_page())
+        self.pages.addWidget(self.build_settings_page())
+        self.pages.addWidget(self.build_web_page())
+
+        layout.addWidget(self.build_sidebar())
+        layout.addWidget(self.pages)
+
+        self.update_weapon_info()
+
+    # =========================
+    # SIDEBAR
+    # =========================
+
+    def build_sidebar(self):
         sidebar = QFrame()
 
         sidebar.setFixedWidth(70)
@@ -200,35 +325,89 @@ class MainWindow(QMainWindow):
 
         sidebar_layout.setSpacing(18)
 
-        self.pages = QStackedWidget()
+        self.sidebar_buttons = []
 
-        # =========================
-        # MAIN PAGE
-        # =========================
+        for index, (icon, tooltip) in enumerate([
+            ("fa5s.home", "Ballistics"),
+            ("fa5s.crosshairs", "Crosshair"),
+            ("fa5s.globe", "SquadCalc")
+        ]):
+            btn = QPushButton()
 
+            btn.setIcon(
+                qta.icon(
+                    icon,
+                    color="white"
+                )
+            )
+
+            btn.setIconSize(
+                QSize(24, 24)
+            )
+
+            btn.setFixedSize(52, 52)
+
+            btn.setCheckable(True)
+
+            btn.setToolTip(tooltip)
+
+            btn.setStyleSheet(
+                BUTTON_STYLE
+            )
+
+            btn.clicked.connect(
+                lambda _checked, i=index: self.set_page(i)
+            )
+
+            sidebar_layout.addWidget(btn)
+
+            self.sidebar_buttons.append(btn)
+
+        sidebar_layout.addStretch()
+
+        self.sidebar_buttons[0].setChecked(True)
+
+        return sidebar
+
+    def set_page(self, index):
+        self.pages.setCurrentIndex(index)
+
+        for i, btn in enumerate(self.sidebar_buttons):
+            btn.setChecked(i == index)
+
+        if index == 2:
+            self.load_web_page()
+
+    # =========================
+    # MAIN PAGE
+    # =========================
+
+    def make_card(self):
+        card = QFrame()
+
+        card.setObjectName("card")
+
+        card.setFixedWidth(440)
+
+        card_layout = QVBoxLayout(card)
+
+        card_layout.setContentsMargins(
+            24,
+            24,
+            24,
+            24
+        )
+
+        return card, card_layout
+
+    def build_main_page(self):
         main_page = QWidget()
 
         main_layout = QVBoxLayout(main_page)
 
         main_layout.addStretch()
 
-        container = QFrame()
-
-        container.setFixedWidth(420)
-
-        container.setStyleSheet("""
-            background-color: rgba(25,30,40,220);
-            border-radius: 20px;
-        """)
-
-        container_layout = QVBoxLayout(container)
-
-        container_layout.setContentsMargins(
-            24,
-            24,
-            24,
-            24
-        )
+        container, container_layout = self.make_card()
 
         container_layout.setSpacing(12)
 
@@ -244,43 +423,77 @@ class MainWindow(QMainWindow):
             )
         )
 
-        validator = QDoubleValidator()
-
         self.weapon_box = QComboBox()
 
-        self.weapon_box.addItems(
-            list(self.weapons.keys())
+        self.populate_weapons()
+
+        self.weapon_box.currentIndexChanged.connect(
+            self.on_weapon_changed
+        )
+
+        self.weapon_info = QLabel()
+
+        self.weapon_info.setWordWrap(True)
+
+        self.weapon_info.setStyleSheet(
+            f"color: {MUTED_COLOR}; font-size: 12px;"
+        )
+
+        self.arc_box = QComboBox()
+
+        for key, label in ARC_OPTIONS:
+            self.arc_box.addItem(label, key)
+
+        arc_index = self.arc_box.findData(
+            self.config.get("arc", "auto")
+        )
+
+        self.arc_box.setCurrentIndex(max(0, arc_index))
+
+        self.arc_box.currentIndexChanged.connect(
+            self.on_arc_changed
         )
 
         self.distance_entry = QLineEdit()
 
         self.distance_entry.setPlaceholderText(
-            "Distance"
+            "Distance to target"
         )
 
         self.distance_entry.setValidator(
-            validator
+            number_validator(allow_negative=False)
         )
 
         self.height_entry = QLineEdit()
 
         self.height_entry.setPlaceholderText(
-            "Height Difference"
+            "0  (target higher = +, lower = −)"
         )
 
         self.height_entry.setValidator(
-            validator
+            number_validator(allow_negative=True)
         )
 
         self.fov_entry = QLineEdit()
 
         self.fov_entry.setPlaceholderText(
-            "FOV"
+            "Horizontal FOV (in-game setting / zoomed)"
+        )
+
+        self.fov_entry.setValidator(
+            number_validator(allow_negative=False)
         )
 
         self.fov_entry.setText(
-            str(self.config["fov"])
+            f"{self.config['fov']:g}"
         )
+
+        for entry in (
+            self.distance_entry,
+            self.height_entry,
+            self.fov_entry
+        ):
+            entry.returnPressed.connect(lambda: self.calculate())
 
         calc_btn = QPushButton(
             "CALCULATE"
@@ -289,26 +502,68 @@ class MainWindow(QMainWindow):
         calc_btn.setFixedHeight(42)
 
         calc_btn.clicked.connect(
-            self.calculate
+            lambda: self.calculate()
         )
+
+        reset_btn = QPushButton(
+            "RESET AIM"
+        )
+
+        reset_btn.setFixedHeight(42)
+
+        reset_btn.setStyleSheet(SECONDARY_BUTTON_STYLE)
+
+        reset_btn.clicked.connect(
+            lambda: self.reset_offset()
+        )
+
+        buttons = QHBoxLayout()
+
+        buttons.addWidget(calc_btn, 2)
+        buttons.addWidget(reset_btn, 1)
 
         self.result_label = QLabel(
             "Ready"
         )
 
-        self.result_label.setStyleSheet("""
-            color: #00ff88;
+        self.result_label.setStyleSheet(f"""
+            color: {OK_COLOR};
             font-size: 18px;
             font-weight: bold;
         """)
 
+        self.details_label = QLabel()
+
+        self.details_label.setWordWrap(True)
+
+        self.details_label.setStyleSheet(
+            f"color: {MUTED_COLOR}; font-size: 12px;"
+        )
+
+        hint = QLabel(
+            "F8 — overlay on/off   ·   F9 — reset aim"
+        )
+
+        hint.setStyleSheet(
+            f"color: {MUTED_COLOR}; font-size: 11px;"
+        )
+
         container_layout.addWidget(title)
         container_layout.addWidget(self.weapon_box)
-        container_layout.addWidget(self.distance_entry)
-        container_layout.addWidget(self.height_entry)
-        container_layout.addWidget(self.fov_entry)
-        container_layout.addWidget(calc_btn)
+        container_layout.addWidget(self.weapon_info)
+        container_layout.addWidget(self.arc_box)
+        for caption, entry in (
+            ("Distance, m", self.distance_entry),
+            ("Height, m", self.height_entry),
+            ("FOV", self.fov_entry)
+        ):
+            container_layout.addLayout(
+                self.labelled_row(caption, entry)
+            )
+        container_layout.addLayout(buttons)
         container_layout.addWidget(self.result_label)
+        container_layout.addWidget(self.details_label)
+        container_layout.addWidget(hint)
 
         main_layout.addWidget(
             container,
@@ -317,37 +572,263 @@ class MainWindow(QMainWindow):
 
         main_layout.addStretch()
 
-        # =========================
-        # SETTINGS PAGE
-        # =========================
+        return main_page
 
-        settings_page = QWidget()
+    def labelled_row(self, caption, widget):
+        row = QHBoxLayout()
 
-        settings_layout = QVBoxLayout(settings_page)
+        label = QLabel(caption)
 
-        settings_layout.addStretch()
+        label.setFixedWidth(100)
 
-        settings_container = QFrame()
+        label.setStyleSheet(f"color: {MUTED_COLOR};")
 
-        settings_container.setFixedWidth(420)
+        row.addWidget(label)
+        row.addWidget(widget)
 
-        settings_container.setStyleSheet("""
-            background-color: rgba(25,30,40,220);
-            border-radius: 20px;
+        return row
+
+    def populate_weapons(self):
+        """Fill the weapon list grouped by category."""
+        groups = {}
+
+        for name, weapon in self.weapons.items():
+            groups.setdefault(weapon.category, []).append(name)
+
+        for category, names in groups.items():
+            if self.weapon_box.count():
+                self.weapon_box.insertSeparator(
+                    self.weapon_box.count()
+                )
+
+            for name in names:
+                self.weapon_box.addItem(name, name)
+
+        last = self.weapon_box.findData(
+            self.config.get("last_weapon", "")
+        )
+
+        if last >= 0:
+            self.weapon_box.setCurrentIndex(last)
+
+    def current_weapon(self):
+        return self.weapons.get(self.weapon_box.currentData())
+
+    def on_weapon_changed(self, *_):
+        weapon = self.current_weapon()
+
+        if weapon is None:
+            return
+
+        self.config["last_weapon"] = weapon.name
+
+        self.schedule_save()
+
+        self.update_weapon_info()
+
+        self.recalculate_if_ready()
+
+    def on_arc_changed(self, *_):
+        self.config["arc"] = self.arc_box.currentData()
+
+        self.schedule_save()
+
+        self.recalculate_if_ready()
+
+    def update_weapon_info(self):
+        weapon = self.current_weapon()
+
+        if weapon is None:
+            self.weapon_info.setText("")
+            return
+
+        parts = [
+            f"{weapon.velocity:g} m/s",
+            f"gravity ×{weapon.gravity:g}",
+            f"max ~{weapon.max_range():.0f} m",
+            f"default: {weapon.arc} arc"
+        ]
+
+        if weapon.min_distance:
+            parts.append(f"min {weapon.min_distance:g} m")
+
+        text = "  ·  ".join(parts)
+
+        if weapon.note:
+            text += f"\n{weapon.note}"
+
+        self.weapon_info.setText(text)
+
+    def recalculate_if_ready(self):
+        if self.distance_entry.text().strip():
+            self.calculate(show_errors=False)
+
+    def show_error(self, message):
+        self.result_label.setStyleSheet(f"""
+            color: {ERROR_COLOR};
+            font-size: 18px;
+            font-weight: bold;
         """)
 
-        settings_inner = QVBoxLayout(
-            settings_container
+        self.result_label.setText(message)
+
+    def show_result(self, text):
+        self.result_label.setStyleSheet(f"""
+            color: {OK_COLOR};
+            font-size: 18px;
+            font-weight: bold;
+        """)
+
+        self.result_label.setText(text)
+
+    def calculate(self, show_errors=True):
+        self.details_label.setText("")
+
+        weapon = self.current_weapon()
+
+        try:
+            if weapon is None:
+                raise ValueError("Select a weapon")
+
+            distance = parse_number(
+                self.distance_entry.text(),
+                "distance"
+            )
+
+            height = parse_number(
+                self.height_entry.text(),
+                "height difference",
+                default=0.0
+            )
+
+            fov = parse_number(
+                self.fov_entry.text(),
+                "FOV"
+            )
+
+            if not 1 <= fov <= 179:
+                raise ValueError("FOV must be between 1 and 179")
+
+            solution = solve(
+                weapon,
+                distance,
+                height,
+                self.arc_box.currentData()
+            )
+
+        except ValueError as e:
+            if show_errors:
+                self.show_error(str(e))
+            return
+
+        if self.config["fov"] != fov:
+            self.config["fov"] = fov
+            self.schedule_save()
+
+        self.last_solution = solution
+
+        if not solution.reachable:
+            self.show_error("Unreachable")
+
+            self.details_label.setText(solution.reason)
+
+            self.overlay.reset_offset()
+
+            return
+
+        self.apply_offset()
+
+        if weapon.unit == "mil":
+            self.show_result(
+                f"{solution.mils:.0f} mil   ({solution.angle:.2f}°)"
+            )
+        else:
+            self.show_result(
+                f"{solution.angle:.2f}°   ({solution.mils:.0f} mil)"
+            )
+
+        details = [
+            f"{solution.arc.capitalize()} arc",
+            f"flight {solution.time_of_flight:.1f} s"
+        ]
+
+        other = "high" if solution.arc == "low" else "low"
+
+        if other in solution.alternatives:
+            details.append(
+                f"{other} arc: {solution.alternatives[other]:.2f}°"
+            )
+
+        offset = self.current_offset()
+
+        if abs(offset) > self.overlay.height() / 2:
+            details.append(
+                "aim point is off-screen — use the angle"
+            )
+        else:
+            details.append(f"offset {offset:.0f} px")
+
+        self.details_label.setText("  ·  ".join(details))
+
+    def current_offset(self):
+        solution = self.last_solution
+
+        if solution is None or not solution.reachable:
+            return 0.0
+
+        return screen_offset(
+            solution.angle,
+            self.config["fov"],
+            self.overlay.screen_width(),
+            self.config["offset_scale"] / 100
         )
 
-        settings_inner.setContentsMargins(
-            24,
-            24,
-            24,
-            24
+    def apply_offset(self):
+        self.overlay.set_offset(self.current_offset())
+
+    def reset_offset(self):
+        self.last_solution = None
+
+        self.overlay.reset_offset()
+
+        self.show_result("Ready")
+
+        self.details_label.setText("")
+
+    def toggle_overlay(self):
+        if self.overlay.isVisible():
+            self.overlay.hide()
+        else:
+            self.overlay.show()
+
+    # =========================
+    # SETTINGS PAGE
+    # =========================
+
+    def build_settings_page(self):
+        settings_page = QWidget()
+
+        page_layout = QVBoxLayout(settings_page)
+
+        page_layout.setContentsMargins(0, 20, 0, 20)
+
+        scroll = QScrollArea()
+
+        scroll.setWidgetResizable(True)
+
+        scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
 
-        settings_inner.setSpacing(15)
+        content = QWidget()
+
+        content.setObjectName("scrollContent")
+
+        content_layout = QVBoxLayout(content)
+
+        settings_container, settings_inner = self.make_card()
+
+        settings_inner.setSpacing(10)
 
         settings_title = QLabel(
             "CROSSHAIR"
@@ -365,467 +846,209 @@ class MainWindow(QMainWindow):
             settings_title
         )
 
-        settings_inner.addWidget(
-            QLabel("DOT SIZE")
+        for label, key in [
+            ("Center Dot", "dot_enabled"),
+            ("Crosshair Lines", "lines_enabled"),
+            ("T-Style (no bottom line)", "t_style"),
+            ("Circle", "circle_enabled"),
+            ("Dot Outline", "outline_enabled"),
+            ("Glow / Bloom", "glow_enabled"),
+            ("Smooth Animation", "animated")
+        ]:
+            self.add_toggle(settings_inner, label, key)
+
+        self.add_slider(settings_inner, "DOT SIZE", 1, 20, "dot_size")
+        self.add_slider(settings_inner, "OPACITY", 20, 255, "opacity")
+        self.add_slider(settings_inner, "LINE LENGTH", 1, 40, "line_length")
+        self.add_slider(settings_inner, "LINE GAP", 0, 30, "line_gap")
+        self.add_slider(settings_inner, "THICKNESS", 1, 10, "line_thickness")
+        self.add_slider(settings_inner, "OUTLINE", 1, 5, "outline_thickness")
+        self.add_slider(settings_inner, "CIRCLE RADIUS", 5, 80, "circle_radius")
+
+        for index, name in enumerate(("RED", "GREEN", "BLUE")):
+            self.add_slider(
+                settings_inner,
+                name,
+                0,
+                255,
+                ("color", index)
+            )
+
+        self.add_slider(
+            settings_inner,
+            "OFFSET CALIBRATION %",
+            50,
+            150,
+            "offset_scale",
+            on_change=self.apply_offset
         )
 
-        dot_slider = QSlider(
-            Qt.Orientation.Horizontal
-        )
-
-        dot_slider.setRange(1, 20)
-
-        dot_slider.setValue(
-            self.config["dot_size"]
-        )
-
-        dot_slider.valueChanged.connect(
-            self.change_dot_size
-        )
-
-        settings_inner.addWidget(
-            dot_slider
-        )
-
-        settings_inner.addWidget(
-            QLabel("OPACITY")
-        )
-
-        opacity_slider = QSlider(
-            Qt.Orientation.Horizontal
-        )
-
-        opacity_slider.setRange(20, 255)
-
-        opacity_slider.setValue(
-            self.config["opacity"]
-        )
-
-        opacity_slider.valueChanged.connect(
-            self.change_opacity
-        )
-
-        settings_inner.addWidget(
-            opacity_slider
-        )
-
-        glow_checkbox = QCheckBox(
-            "Glow / Bloom"
-        )
-
-        glow_checkbox.setChecked(
-            self.config["glow_enabled"]
-        )
-
-        glow_checkbox.stateChanged.connect(
-            self.toggle_glow
-        )
-
-        settings_inner.addWidget(
-            glow_checkbox
-        )
-
-        lines_checkbox = QCheckBox(
-            "Crosshair Lines"
-        )
-
-        lines_checkbox.setChecked(
-            self.config["lines_enabled"]
-        )
-
-        lines_checkbox.stateChanged.connect(
-            self.toggle_lines
-        )
-
-        settings_inner.addWidget(
-            lines_checkbox
-        )
-
-        dot_checkbox = QCheckBox(
-            "Center Dot"
-        )
-
-        dot_checkbox.setChecked(
-            self.config["dot_enabled"]
-        )
-
-        dot_checkbox.stateChanged.connect(
-            self.toggle_dot
-        )
-
-        settings_inner.addWidget(
-            dot_checkbox
-        )
-
-        settings_layout.addWidget(
+        content_layout.addWidget(
             settings_container,
-            alignment=Qt.AlignmentFlag.AlignCenter
+            alignment=Qt.AlignmentFlag.AlignHCenter
         )
 
-        settings_layout.addStretch()
+        content_layout.addStretch()
 
-        settings_inner.addWidget(
-                QLabel("LINE LENGTH")
-            )
+        scroll.setWidget(content)
 
-        length_slider = QSlider(
-                Qt.Orientation.Horizontal
-            )
+        scroll.viewport().setAutoFillBackground(False)
 
-        length_slider.setRange(1, 40)
+        page_layout.addWidget(scroll)
 
-        length_slider.setValue(
-                self.config["line_length"]
-            )
+        return settings_page
 
-        length_slider.valueChanged.connect(
-                self.change_line_length
-            )
+    def get_setting(self, key):
+        if isinstance(key, tuple):
+            name, index = key
+            return self.config[name][index]
 
-        settings_inner.addWidget(
-                length_slider
-            )
-        
-        settings_inner.addWidget(
-            QLabel("LINE GAP")
+        return self.config[key]
+
+    def set_setting(self, key, value):
+        if isinstance(key, tuple):
+            name, index = key
+            self.config[name][index] = value
+        else:
+            self.config[key] = value
+
+        self.overlay.update()
+
+        self.schedule_save()
+
+    def add_toggle(self, layout, label, key):
+        checkbox = QCheckBox(label)
+
+        checkbox.setChecked(bool(self.config[key]))
+
+        checkbox.toggled.connect(
+            lambda checked: self.set_setting(key, checked)
         )
 
-        gap_slider = QSlider(
+        layout.addWidget(checkbox)
+
+        return checkbox
+
+    def add_slider(
+        self,
+        layout,
+        label,
+        minimum,
+        maximum,
+        key,
+        on_change=None
+    ):
+        header = QHBoxLayout()
+
+        name_label = QLabel(label)
+
+        value_label = QLabel()
+
+        value_label.setStyleSheet(f"color: {MUTED_COLOR};")
+
+        header.addWidget(name_label)
+        header.addStretch()
+        header.addWidget(value_label)
+
+        slider = QSlider(
             Qt.Orientation.Horizontal
         )
 
-        gap_slider.setRange(0, 30)
+        slider.setRange(minimum, maximum)
 
-        gap_slider.setValue(
-            self.config["line_gap"]
-        )
+        value = int(self.get_setting(key))
 
-        gap_slider.valueChanged.connect(
-            self.change_gap
-        )
+        slider.setValue(max(minimum, min(maximum, value)))
 
-        settings_inner.addWidget(
-            gap_slider
-        )
+        value_label.setText(str(slider.value()))
 
-        settings_inner.addWidget(
-            QLabel("THICKNESS")
-        )
+        def handle(new_value):
+            value_label.setText(str(new_value))
 
-        thickness_slider = QSlider(
-            Qt.Orientation.Horizontal
-        )
+            self.set_setting(key, new_value)
 
-        thickness_slider.setRange(1, 10)
+            if on_change:
+                on_change()
 
-        thickness_slider.setValue(
-            self.config["line_thickness"]
-        )
+        slider.valueChanged.connect(handle)
 
-        thickness_slider.valueChanged.connect(
-            self.change_thickness
-        )
+        layout.addLayout(header)
+        layout.addWidget(slider)
 
-        settings_inner.addWidget(
-            thickness_slider
-        )
+        return slider
 
-        settings_inner.addWidget(
-            QLabel("RED")
-        )
+    def schedule_save(self):
+        self.save_timer.start()
 
-        red_slider = QSlider(
-            Qt.Orientation.Horizontal
-        )
+    # =========================
+    # WEB PAGE
+    # =========================
 
-        red_slider.setRange(0, 255)
-
-        red_slider.setValue(
-            self.config["color"][0]
-        )
-
-        red_slider.valueChanged.connect(
-            self.change_red
-        )
-
-        settings_inner.addWidget(
-            red_slider
-        )
-
-        settings_inner.addWidget(
-            QLabel("GREEN")
-        )
-
-        green_slider = QSlider(
-            Qt.Orientation.Horizontal
-        )
-
-        green_slider.setRange(0, 255)
-
-        green_slider.setValue(
-            self.config["color"][1]
-        )
-
-        green_slider.valueChanged.connect(
-            self.change_green
-        )
-
-        settings_inner.addWidget(
-            green_slider
-        )
-
-        settings_inner.addWidget(
-            QLabel("BLUE")
-        )
-
-        blue_slider = QSlider(
-            Qt.Orientation.Horizontal
-        )
-
-        blue_slider.setRange(0, 255)
-
-        blue_slider.setValue(
-            self.config["color"][2]
-        )
-
-        blue_slider.valueChanged.connect(
-            self.change_red
-        )
-
-        settings_inner.addWidget(
-            blue_slider
-        )
-
-        # =========================
-        # WEB PAGE
-        # =========================
-
+    def build_web_page(self):
         web_page = QWidget()
 
-        web_layout = QVBoxLayout(web_page)
+        self.web_layout = QVBoxLayout(web_page)
 
-        web_layout.setContentsMargins(
+        self.web_layout.setContentsMargins(
             20,
             20,
             20,
             20
         )
 
-        browser = QWebEngineView()
+        self.browser = None
 
-        browser.load(
-            QUrl(
-                "https://squadcalc.app/?map=AlBasrah"
-            )
-        )
+        return web_page
 
-        browser.setStyleSheet("""
-            border-radius: 20px;
-        """)
+    def load_web_page(self):
+        """Create the embedded browser on first use (it is heavy)."""
+        if self.browser is not None:
+            return
 
-        web_layout.addWidget(browser)
-
-        self.pages.addWidget(main_page)
-        self.pages.addWidget(settings_page)
-        self.pages.addWidget(web_page)
-
-        # =========================
-        # BUTTONS
-        # =========================
-
-        def create_sidebar_button(icon):
-            btn = QPushButton()
-
-            btn.setIcon(
-                qta.icon(
-                    icon,
-                    color="white"
-                )
-            )
-
-            btn.setIconSize(
-                QSize(24, 24)
-            )
-
-            btn.setFixedSize(52, 52)
-
-            btn.setStyleSheet(
-                BUTTON_STYLE
-            )
-
-            return btn
-
-        home_btn = create_sidebar_button(
-            "fa5s.home"
-        )
-
-        home_btn.clicked.connect(
-            lambda: self.pages.setCurrentIndex(0)
-        )
-
-        sidebar_layout.addWidget(home_btn)
-
-        settings_btn = create_sidebar_button(
-            "fa5s.crosshairs"
-        )
-
-        settings_btn.clicked.connect(
-            lambda: self.pages.setCurrentIndex(1)
-        )
-
-        sidebar_layout.addWidget(settings_btn)
-
-        web_btn = create_sidebar_button(
-            "fa5s.globe"
-        )
-
-        web_btn.clicked.connect(
-            lambda: self.pages.setCurrentIndex(2)
-        )
-
-        sidebar_layout.addWidget(web_btn)
-
-        sidebar_layout.addStretch()
-
-        layout.addWidget(sidebar)
-        layout.addWidget(self.pages)
-
-    def change_line_length(self, value):
-        self.config["line_length"] = value
-        save_config(self.config)
-
-    def change_gap(self, value):
-        self.config["line_gap"] = value
-        save_config(self.config)
-
-    def change_thickness(self, value):
-        self.config["line_thickness"] = value
-        save_config(self.config)
-
-    def change_red(self, value):
-        self.config["color"][0] = value
-        save_config(self.config)
-
-    def change_green(self, value):
-        self.config["color"][1] = value
-        save_config(self.config)
-
-    def change_blue(self, value):
-        self.config["color"][2] = value
-        save_config(self.config)
-
-    def toggle_overlay(self):
-        if self.overlay.isVisible():
-            self.overlay.hide()
-        else:
-            self.overlay.show()
-
-    def change_dot_size(self, value):
-        self.config["dot_size"] = value
-
-        save_config(self.config)
-
-    def change_opacity(self, value):
-        self.config["opacity"] = value
-
-        save_config(self.config)
-    
-    def toggle_glow(self, state):
-        self.config["glow_enabled"] = bool(state)
-
-        save_config(self.config)
-
-        self.overlay.update()
-    
-    def toggle_lines(self, state):
-        self.config["lines_enabled"] = bool(state)
-
-        save_config(self.config)
-
-        self.overlay.update()
-    
-    def toggle_dot(self, state):
-        self.config["dot_enabled"] = bool(state)
-
-        save_config(self.config)
-
-        self.overlay.update()
-
-    def calculate(self):
         try:
-            weapon_name = (
-                self.weapon_box.currentText()
+            from PyQt6.QtWebEngineWidgets import QWebEngineView
+        except ImportError:
+            self.browser = False
+
+            label = QLabel(
+                "Embedded browser is not available (PyQt6-WebEngine "
+                "is not installed)."
             )
 
-            distance = float(
-                self.distance_entry.text()
+            open_btn = QPushButton("OPEN SQUADCALC IN BROWSER")
+
+            open_btn.clicked.connect(
+                lambda: QDesktopServices.openUrl(QUrl(SQUADCALC_URL))
             )
 
-            height = float(
-                self.height_entry.text()
+            self.web_layout.addStretch()
+            self.web_layout.addWidget(
+                label,
+                alignment=Qt.AlignmentFlag.AlignCenter
             )
-
-            fov = float(
-                self.fov_entry.text()
+            self.web_layout.addWidget(
+                open_btn,
+                alignment=Qt.AlignmentFlag.AlignCenter
             )
+            self.web_layout.addStretch()
+            return
 
-            self.config["fov"] = fov
+        self.browser = QWebEngineView()
 
-            save_config(self.config)
-
-            velocity = self.weapons[
-                weapon_name
-            ]["velocity"]
-
-            angle = self.calculate_angle(
-                distance,
-                height,
-                velocity
-            )
-
-            offset = (
-                angle * 18 * (90 / fov)
-            )
-
-            self.overlay.set_offset(
-                offset
-            )
-
-            self.result_label.setText(
-                f"{angle:.2f}°"
-            )
-
-        except Exception as e:
-            QMessageBox.warning(
-                self,
-                "Error",
-                str(e)
-            )
-
-    def calculate_angle(
-        self,
-        distance,
-        height_diff,
-        velocity
-    ):
-        g = 9.81
-
-        angle = math.atan(
-            (
-                velocity**2
-                - math.sqrt(
-                    velocity**4
-                    - g * (
-                        g * distance**2
-                        + 2 * height_diff * velocity**2
-                    )
-                )
-            )
-            / (g * distance)
+        self.browser.load(
+            QUrl(SQUADCALC_URL)
         )
 
-        return math.degrees(angle)
+        self.web_layout.addWidget(self.browser)
 
     def closeEvent(self, event):
+        if self.save_timer.isActive():
+            self.save_timer.stop()
+
+        save_config(self.config)
+
+        teardown_hotkeys(self)
+
         self.overlay.close()
+
         event.accept()

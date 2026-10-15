@@ -1,11 +1,24 @@
 import os
 import sys
+
 os.environ["QT_LOGGING_RULES"] = "*.debug=false"
 
-import sys
-import json
+from PyQt6.QtWidgets import (
+    QApplication,
+    QMessageBox
+)
 
-from PyQt6.QtWidgets import QApplication
+try:
+    # QtWebEngine must be imported before QApplication is created.
+    import PyQt6.QtWebEngineWidgets  # noqa: F401
+except ImportError:
+    pass
+
+from ballistics import (
+    load_weapons,
+    WeaponDataError
+)
+
 from utils import resource_path
 from splash import SplashScreen
 
@@ -15,51 +28,81 @@ from updater import (
     apply_update
 )
 
-from crosshair import MainWindow
 
-with open(
-    resource_path("weapons.json"),
-    "r",
-    encoding="utf-8"
-) as f:
+def run_update(app, splash):
+    update = check_for_updates()
 
-    weapons = json.load(f)
-
-app = QApplication(sys.argv)
-
-splash = SplashScreen()
-
-splash.show()
-
-app.processEvents()
-
-update = check_for_updates()
-
-if update:
+    if not update:
+        return
 
     splash.status.setText(
         f"Downloading {update}..."
     )
 
     def progress(percent):
-        splash.progress.setValue(percent)
+        if percent is None:
+            # Unknown size: show a busy indicator.
+            splash.progress.setRange(0, 0)
+        else:
+            splash.progress.setValue(percent)
 
         app.processEvents()
 
-    download_update(progress)
+    try:
+        download_update(progress)
 
-    splash.status.setText(
-        "Installing..."
-    )
+        splash.status.setText(
+            "Installing..."
+        )
+
+        app.processEvents()
+
+        apply_update()
+
+    except Exception as e:
+        # A failed update must never prevent the app from starting.
+        splash.progress.setRange(0, 100)
+
+        splash.status.setText(
+            f"Update failed: {e}"
+        )
+
+        app.processEvents()
+
+
+def main():
+    app = QApplication(sys.argv)
+
+    try:
+        weapons = load_weapons(
+            resource_path("weapons.json")
+        )
+    except WeaponDataError as e:
+        QMessageBox.critical(
+            None,
+            "Squad Ballistics",
+            str(e)
+        )
+        return 1
+
+    splash = SplashScreen()
+
+    splash.show()
 
     app.processEvents()
 
-    apply_update()
+    run_update(app, splash)
 
-window = MainWindow(weapons)
+    from crosshair import MainWindow
 
-window.show()
+    window = MainWindow(weapons)
 
-splash.close()
+    window.show()
 
-sys.exit(app.exec())
+    splash.close()
+
+    return app.exec()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

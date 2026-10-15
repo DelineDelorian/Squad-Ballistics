@@ -1,0 +1,97 @@
+{
+    "_comment": "velocity in m/s, gravity = projectile gravity scale (1 = normal). Optional: arc (low/high), unit (deg/mil), angle_offset, deceleration, deceleration_time, min_distance, elevation_limits [min, max], category, note.",
+
+    "MK-19&AGS-17": {
+        "velocity": 230,
+        "gravity": 1,
+        "category": "Grenade launchers"
+    },
+    "BTR-4 AGS": {
+        "velocity": 190,
+        "gravity": 1,
+        "category": "Grenade launchers"
+    },
+    "M203&GP-25&MKE MGL": {
+        "velocity": 76,
+        "gravity": 1,
+        "category": "Grenade launchers"
+    },
+    "Rifle Grenade (Both options)": {
+        "velocity": 75,
+        "gravity": 1,
+        "category": "Grenade launchers"
+    },
+    "RPG-29": {
+        "velocity": 280,
+        "gravity": 1,
+        "category": "Anti-tank"
+    },
+    "SPG-9": {
+        "velocity": 435,
+        "gravity": 1.2,
+        "category": "Anti-tank"
+    },
+    "ZIS-3": {
+        "velocity": 700,
+        "gravity": 2,
+        "category": "Anti-tank"
+    },
+
+    "Mortar": {
+        "velocity": 110,
+        "gravity": 1,
+        "arc": "high",
+        "unit": "mil",
+        "min_distance": 51,
+        "elevation_limits": [45, 88.875],
+        "category": "Indirect fire",
+        "note": "M252 / 2B14 / L16 / Type 63 mortar"
+    },
+    "Technical Mortar": {
+        "velocity": 110,
+        "gravity": 1,
+        "arc": "high",
+        "angle_offset": 5,
+        "min_distance": 51,
+        "elevation_limits": [-45, 135],
+        "category": "Indirect fire",
+        "note": "Angle is the value shown on the technical's elevation readout"
+    },
+    "M1064 M121 (120mm)": {
+        "velocity": 142,
+        "gravity": 1,
+        "arc": "high",
+        "min_distance": 340,
+        "elevation_limits": [-45, 85.3],
+        "category": "Indirect fire"
+    },
+    "Hell Cannon": {
+        "velocity": 95,
+        "gravity": 1,
+        "arc": "high",
+        "elevation_limits": [10, 90],
+        "category": "Indirect fire"
+    },
+    "UB-32 (S-5 rockets)": {
+        "velocity": 300,
+        "gravity": 2,
+        "deceleration": 50,
+        "deceleration_time": 2,
+        "elevation_limits": [-25, 35],
+        "category": "Indirect fire"
+    },
+    "Technical UB-32": {
+        "velocity": 300,
+        "gravity": 2,
+        "deceleration": 50,
+        "deceleration_time": 2,
+        "elevation_limits": [-45, 135],
+        "category": "Indirect fire"
+    },
+    "BM-21 Grad": {
+        "velocity": 200,
+        "gravity": 2,
+        "elevation_limits": [-45, 135],
+        "category": "Indirect fire"
+    }
+}

@@ -1,23 +1,24 @@
-from PyQt6.QtCore import Qt, QTimer
+import math
+
+from PyQt6.QtCore import (
+    Qt,
+    QTimer,
+    QPointF
+)
 
 from PyQt6.QtGui import (
     QColor,
     QPainter,
     QBrush,
-    QPen
-)
-
-from PyQt6.QtCore import (
-    Qt,
-    QTimer,
-    QPropertyAnimation,
-    QEasingCurve
+    QPen,
+    QPolygonF
 )
 
 from PyQt6.QtWidgets import (
     QWidget,
     QApplication
 )
+
 
 class Overlay(QWidget):
     def __init__(self, config):
@@ -29,6 +30,7 @@ class Overlay(QWidget):
             Qt.WindowType.FramelessWindowHint
             | Qt.WindowType.WindowStaysOnTopHint
             | Qt.WindowType.Tool
+            | Qt.WindowType.WindowTransparentForInput
         )
 
         self.setAttribute(
@@ -39,63 +41,60 @@ class Overlay(QWidget):
             Qt.WidgetAttribute.WA_TransparentForMouseEvents
         )
 
-        screen = QApplication.primaryScreen().geometry()
+        self.setAttribute(
+            Qt.WidgetAttribute.WA_ShowWithoutActivating
+        )
 
-        self.setGeometry(screen)
+        self.setGeometry(
+            QApplication.primaryScreen().geometry()
+        )
 
-        self.center_x = screen.width() // 2
-        self.center_y = screen.height() // 2
+        self.offset = 0.0
 
-        self.offset = 0
-        
-        self.target_offset = 0
-        self.animation_timer = QTimer()
+        self.target_offset = 0.0
+
+        # The animation timer only runs while the aim point is moving.
+        self.animation_timer = QTimer(self)
 
         self.animation_timer.timeout.connect(
             self.animate_offset
         )
 
-        self.animation_timer.start(16)
-
-        def animate_offset(self):
-            self.offset += (
-                self.target_offset - self.offset
-            ) * 0.12
-
-            if abs(
-                self.target_offset - self.offset
-            ) < 0.01:
-                self.offset = self.target_offset
-
-            self.update()
-
-        self.animation = QPropertyAnimation(
-            self,
-            b"windowOpacity"
-        )
-
-        self.animation.setDuration(120)
-
-        self.animation.setEasingCurve(
-            QEasingCurve.Type.OutCubic
-        )
-
-        self.timer = QTimer()
-
-        self.timer.timeout.connect(
-            self.update
-        )
-
-        fps = config["fps"]
-
-        self.timer.start(
-            int(1000 / fps)
-        )
-
         self.show()
 
+    @property
+    def center_x(self):
+        return self.width() // 2
+
+    @property
+    def center_y(self):
+        return self.height() // 2
+
+    def screen_width(self):
+        return self.width()
+
     def set_offset(self, value):
-        self.target_offset = value
+        value = float(value)
+
+        if math.isnan(value):
+            value = 0.0
+
+        # Off-screen offsets only need to keep their direction.
+        limit = self.height() * 2
+        self.target_offset = max(-limit, min(limit, value))
+
+        if not self.config.get("animated", True):
+            self.offset = self.target_offset
+            self.animation_timer.stop()
+            self.update()
+            return
+
+        fps = max(10, min(240, int(self.config.get("fps", 60))))
+
+        self.animation_timer.start(int(1000 / fps))
+
+    def reset_offset(self):
+        self.set_offset(0)
 
     def animate_offset(self):
         self.offset += (
@@ -108,41 +107,40 @@ class Overlay(QWidget):
 
             self.offset = self.target_offset
 
+            self.animation_timer.stop()
+
         self.update()
 
     def paintEvent(self, event):
-        painter = QPainter()
-
-        painter.begin(self)
+        painter = QPainter(self)
 
         painter.setRenderHint(
             QPainter.RenderHint.Antialiasing
         )
 
-        r, g, b = self.config["color"]
+        cfg = self.config
 
-        opacity = self.config["opacity"]
+        r, g, b = cfg["color"]
 
-        dot_size = self.config["dot_size"]
-
-        color = QColor(
-            r,
-            g,
-            b,
-            opacity
-        )
+        color = QColor(r, g, b, cfg["opacity"])
 
         x = self.center_x
-        y = int(self.center_y + self.offset)
-        cfg = self.config
+        y = round(self.center_y + self.offset)
+
+        margin = 20
+
+        if not margin <= y <= self.height() - margin:
+            # The aim point is off-screen (very high angle shot):
+            # show an arrow on the edge pointing towards it.
+            self.draw_edge_arrow(painter, color, x, y < margin)
+            painter.end()
+            return
+
+        dot_size = cfg["dot_size"]
 
         if cfg["glow_enabled"]:
 
-            glow = QColor(
-                g,
-                b,
-                80
-            )
+            glow = QColor(r, g, b, min(80, cfg["opacity"]))
 
             painter.setBrush(
                 QBrush(glow)
@@ -151,31 +149,33 @@ class Overlay(QWidget):
             painter.setPen(Qt.PenStyle.NoPen)
 
             painter.drawEllipse(
-                x - dot_size - 5,
-                y - dot_size - 5,
-                (dot_size + 5) * 2,
-                (dot_size + 5) * 2
+                QPointF(x, y),
+                dot_size + 5,
+                dot_size + 5
             )
+
         if cfg["dot_enabled"]:
 
             painter.setBrush(
                 QBrush(color)
             )
 
-            painter.setPen(
-                QPen(
-                    QColor("white"),
-                    cfg["outline_thickness"]
+            if cfg["outline_enabled"]:
+                painter.setPen(
+                    QPen(
+                        QColor("white"),
+                        cfg["outline_thickness"]
+                    )
                 )
-            )
+            else:
+                painter.setPen(Qt.PenStyle.NoPen)
 
             painter.drawEllipse(
-                x - dot_size,
-                y - dot_size,
-                dot_size * 2,
-                dot_size * 2
+                QPointF(x, y),
+                dot_size,
+                dot_size
             )
-        
+
         if cfg["lines_enabled"]:
 
             painter.setPen(
@@ -243,10 +243,31 @@ class Overlay(QWidget):
             radius = cfg["circle_radius"]
 
             painter.drawEllipse(
-                x - radius,
-                y - radius,
-                radius * 2,
-                radius * 2
+                QPointF(x, y),
+                radius,
+                radius
             )
-        
+
         painter.end()
+
+    def draw_edge_arrow(self, painter, color, x, top):
+        size = 14
+
+        if top:
+            tip = 8
+            base = tip + size
+        else:
+            tip = self.height() - 8
+            base = tip - size
+
+        painter.setPen(Qt.PenStyle.NoPen)
+
+        painter.setBrush(QBrush(color))
+
+        painter.drawPolygon(
+            QPolygonF([
+                QPointF(x, tip),
+                QPointF(x - size, base),
+                QPointF(x + size, base)
+            ])
+        )
