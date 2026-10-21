@@ -1,22 +1,23 @@
 import os
-import sys
+import shutil
 import subprocess
-import zipfile
+import sys
 import tempfile
 
 import requests
 
-CURRENT_VERSION = "1.1.0"
+CURRENT_VERSION = "1.2.0"
 
 VERSION_URL = (
     "https://raw.githubusercontent.com/"
     "DelineDelorian/Squad-Ballistics/main/version.txt"
 )
 
+# The app is a single .exe; an update replaces that one file.
 EXE_URL = (
     "https://github.com/"
     "DelineDelorian/Squad-Ballistics/releases/latest/download/"
-    "SquadBallistics.zip"
+    "SquadBallistics.exe"
 )
 
 UPDATE_DIR = os.path.join(
@@ -24,7 +25,7 @@ UPDATE_DIR = os.path.join(
     "SquadBallisticsUpdate"
 )
 
-UPDATE_ZIP = os.path.join(UPDATE_DIR, "update.zip")
+NEW_EXE = os.path.join(UPDATE_DIR, "SquadBallistics.new.exe")
 
 
 def is_frozen():
@@ -79,7 +80,7 @@ def check_for_updates():
 
 
 def download_update(progress_callback=None):
-    """Download the release zip. progress_callback(percent or None)."""
+    """Download the new .exe. progress_callback(percent or None)."""
     os.makedirs(UPDATE_DIR, exist_ok=True)
 
     with requests.get(
@@ -100,7 +101,7 @@ def download_update(progress_callback=None):
         downloaded = 0
 
         with open(
-            UPDATE_ZIP,
+            NEW_EXE,
             "wb"
         ) as f:
 
@@ -119,50 +120,47 @@ def download_update(progress_callback=None):
                     else:
                         progress_callback(None)
 
-    if not zipfile.is_zipfile(UPDATE_ZIP):
-        raise RuntimeError("Downloaded update is not a valid zip file")
+    if total and downloaded != total:
+        raise RuntimeError("The download was interrupted")
+
+    with open(NEW_EXE, "rb") as f:
+        if f.read(2) != b"MZ":
+            raise RuntimeError("Downloaded update is not a Windows program")
+
+
+def update_script(new_exe, exe_path):
+    """Batch script that swaps the .exe once this process has exited.
+
+    The running .exe is locked until the app (and PyInstaller's
+    bootloader) exits, so the move is retried for up to a minute. The app
+    is restarted either way, so a failed update never leaves the user
+    without a working program.
+    """
+    return (
+        "@echo off\r\n"
+        # Paths may contain non-ASCII characters (e.g. a Cyrillic user
+        # name in %TEMP%), so switch cmd to UTF-8 before using them.
+        "chcp 65001 >nul\r\n"
+        "set tries=0\r\n"
+        ":retry\r\n"
+        "timeout /t 1 /nobreak >nul\r\n"
+        f'move /y "{new_exe}" "{exe_path}" >nul 2>nul && goto start\r\n'
+        "set /a tries+=1\r\n"
+        "if %tries% lss 60 goto retry\r\n"
+        ":start\r\n"
+        f'start "" "{exe_path}"\r\n'
+        '(goto) 2>nul & del "%~f0"\r\n'
+    )
 
 
 def apply_update():
-    """Replace the installed files and restart. Exits the process."""
+    """Replace the running .exe with the downloaded one and restart."""
     if not is_frozen():
         return
 
     exe_path = os.path.abspath(sys.executable)
 
-    current_dir = os.path.dirname(exe_path)
-
-    extract_dir = tempfile.mkdtemp(dir=UPDATE_DIR)
-
-    with zipfile.ZipFile(
-        UPDATE_ZIP,
-        "r"
-    ) as zip_ref:
-
-        zip_ref.extractall(extract_dir)
-
-    extracted_folder = os.path.join(
-        extract_dir,
-        "SquadBallistics"
-    )
-
-    if not os.path.isdir(extracted_folder):
-        extracted_folder = extract_dir
-
     bat_path = os.path.join(UPDATE_DIR, "update.bat")
-
-    bat = (
-        "@echo off\r\n"
-        # Paths may contain non-ASCII characters (e.g. a Cyrillic user
-        # name in %TEMP%), so switch cmd to UTF-8 before using them.
-        "chcp 65001 >nul\r\n"
-        "timeout /t 2 /nobreak >nul\r\n"
-        f'xcopy "{extracted_folder}" "{current_dir}" /E /H /C /I /Y >nul\r\n'
-        f'del "{UPDATE_ZIP}"\r\n'
-        f'rmdir /s /q "{extract_dir}"\r\n'
-        f'start "" "{exe_path}"\r\n'
-        '(goto) 2>nul & del "%~f0"\r\n'
-    )
 
     with open(
         bat_path,
@@ -171,7 +169,7 @@ def apply_update():
         newline=""
     ) as f:
 
-        f.write(bat)
+        f.write(update_script(NEW_EXE, exe_path))
 
     subprocess.Popen(
         ["cmd", "/c", bat_path],
@@ -179,3 +177,29 @@ def apply_update():
     )
 
     sys.exit(0)
+
+
+def remove_old_install_files():
+    """Delete what the old folder-based version left next to the .exe.
+
+    Versions up to 1.1.0 were a folder with SquadBallistics.exe and an
+    "_internal" directory. Updating them puts the single-file .exe into
+    that folder, leaving ~200 MB of unused files behind. Only our own,
+    recognisable layout is removed.
+    """
+    if not is_frozen():
+        return
+
+    exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+    internal = os.path.join(exe_dir, "_internal")
+
+    if os.path.normcase(getattr(sys, "_MEIPASS", "")) == os.path.normcase(
+        internal
+    ):
+        # Still a folder build: these files are in use.
+        return
+
+    markers = ("weapons.json", "base_library.zip")
+
+    if all(os.path.exists(os.path.join(internal, m)) for m in markers):
+        shutil.rmtree(internal, ignore_errors=True)

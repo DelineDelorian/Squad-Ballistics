@@ -6,10 +6,20 @@ import sys
 
 APP_NAME = "SquadBallistics"
 
-# Config used to live in "configs/config.json" relative to the working
-# directory, which changes depending on how the app is started. It is read
-# once from there and migrated to the per-user location below.
+# Versions up to 1.1.0 kept "configs/config.json" relative to the working
+# directory (normally the folder of the .exe). It is read once from there
+# and migrated to the per-user location below.
 LEGACY_CONFIG_PATH = os.path.join("configs", "config.json")
+
+
+def legacy_config_paths():
+    paths = [LEGACY_CONFIG_PATH]
+
+    if getattr(sys, "frozen", False):
+        exe_dir = os.path.dirname(os.path.abspath(sys.executable))
+        paths.append(os.path.join(exe_dir, "configs", "config.json"))
+
+    return paths
 
 DEFAULT_CONFIG = {
     "fov": 90,
@@ -183,7 +193,7 @@ def _read(path):
 def load_config(path=None):
     path = path or CONFIG_PATH
 
-    for candidate in (path, LEGACY_CONFIG_PATH):
+    for candidate in [path] + legacy_config_paths():
         if not os.path.exists(candidate):
             continue
 

@@ -115,3 +115,23 @@ def test_defaults_are_inside_ranges():
 
     for key, choices in config.CHOICES.items():
         assert config.DEFAULT_CONFIG[key] in choices, key
+
+
+def test_legacy_config_next_to_frozen_exe(tmp_path, monkeypatch):
+    run_dir = tmp_path / "somewhere_else"
+    run_dir.mkdir()
+    monkeypatch.chdir(run_dir)
+
+    exe_dir = tmp_path / "app"
+    (exe_dir / "configs").mkdir(parents=True)
+    (exe_dir / "configs" / "config.json").write_text(json.dumps({"fov": 104}))
+
+    monkeypatch.setattr(config.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(
+        config.sys, "executable", str(exe_dir / "SquadBallistics.exe")
+    )
+
+    path = tmp_path / "appdata" / "config.json"
+
+    assert config.load_config(str(path))["fov"] == 104
+    assert json.loads(path.read_text())["fov"] == 104
