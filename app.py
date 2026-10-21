@@ -1,65 +1,260 @@
 import os
 import sys
+import tempfile
+import threading
+import traceback
+
 os.environ["QT_LOGGING_RULES"] = "*.debug=false"
 
-import sys
-import json
+from PyQt6.QtWidgets import (
+    QApplication,
+    QMessageBox
+)
 
-from PyQt6.QtWidgets import QApplication
+try:
+    # QtWebEngine must be imported before QApplication is created.
+    import PyQt6.QtWebEngineWidgets  # noqa: F401
+except ImportError:
+    pass
+
+from ballistics import (
+    load_weapons,
+    WeaponDataError
+)
+
+import config
+from config import config_dir, load_config
+from i18n import set_language, tr
 from utils import resource_path
 from splash import SplashScreen
 
 from updater import (
     check_for_updates,
     download_update,
-    apply_update
+    apply_update,
+    remove_old_install_files
 )
 
-from crosshair import MainWindow
+from webmap import configure_environment
 
-with open(
-    resource_path("weapons.json"),
-    "r",
-    encoding="utf-8"
-) as f:
 
-    weapons = json.load(f)
+def close_build_splash():
+    """Close the image PyInstaller shows while the .exe unpacks itself."""
+    try:
+        import pyi_splash
+    except ImportError:
+        return
 
-app = QApplication(sys.argv)
+    try:
+        pyi_splash.close()
+    except Exception:
+        pass
 
-splash = SplashScreen()
 
-splash.show()
+def run_update(app, splash):
+    update = check_for_updates()
 
-app.processEvents()
-
-update = check_for_updates()
-
-if update:
+    if not update:
+        return
 
     splash.status.setText(
-        f"Downloading {update}..."
+        tr("splash_downloading", v=update)
     )
 
     def progress(percent):
-        splash.progress.setValue(percent)
+        if percent is None:
+            # Unknown size: show a busy indicator.
+            splash.progress.setRange(0, 0)
+        else:
+            splash.progress.setValue(percent)
 
         app.processEvents()
 
-    download_update(progress)
+    try:
+        download_update(progress)
 
-    splash.status.setText(
-        "Installing..."
+        splash.status.setText(
+            tr("splash_installing")
+        )
+
+        app.processEvents()
+
+        apply_update()
+
+    except Exception as e:
+        # A failed update must never prevent the app from starting.
+        splash.progress.setRange(0, 100)
+
+        splash.status.setText(
+            tr("splash_failed", e=e)
+        )
+
+        app.processEvents()
+
+
+def install_crash_handler():
+    """Show and log unexpected errors instead of silently closing.
+
+    The .exe has no console, so without this a crash leaves no trace.
+    """
+    log_path = os.path.join(config_dir(), "crash.log")
+
+    def handler(exc_type, exc, tb):
+        text = "".join(traceback.format_exception(exc_type, exc, tb))
+
+        try:
+            os.makedirs(config_dir(), exist_ok=True)
+
+            with open(log_path, "a", encoding="utf-8") as f:
+                f.write(text + "\n")
+        except OSError:
+            pass
+
+        if QApplication.instance():
+            QMessageBox.critical(
+                None,
+                tr("error_title"),
+                f"{exc}\n\n" + tr("error_saved", path=log_path)
+            )
+
+    sys.excepthook = handler
+
+
+def selftest():
+    """Smoke test of a build: SquadBallistics.exe --selftest
+
+    Loads the bundled data, opens the main window and runs a calculation
+    for every weapon through the UI. Exit code 0 means everything works;
+    otherwise the error is written to selftest.log next to the executable.
+    """
+    log_path = os.path.join(
+        os.path.dirname(os.path.abspath(sys.argv[0])),
+        "selftest.log"
     )
+
+    try:
+        # Never touch the user's real settings (last weapon, recent list).
+        config.CONFIG_PATH = os.path.join(
+            tempfile.mkdtemp(prefix="sb-selftest-"),
+            "config.json"
+        )
+
+        configure_environment("auto")
+
+        app = QApplication(sys.argv)
+
+        close_build_splash()
+
+        weapons = load_weapons(
+            resource_path("weapons.json")
+        )
+
+        from crosshair import MainWindow
+
+        window = MainWindow(weapons)
+
+        window.show()
+
+        lines = []
+
+        from ballistics import solve
+
+        for name, weapon in weapons.items():
+            # A distance the weapon can reach with its default arc
+            # (some artillery cannot fire flat at short range).
+            for fraction in (0.3, 0.6, 0.85):
+                distance = max(
+                    weapon.min_distance + 5,
+                    min(weapon.max_range() * fraction, 1500)
+                )
+
+                if solve(weapon, distance).reachable:
+                    break
+
+            window.select_weapon(name)
+
+            window.distance_entry.setText(f"{distance:.0f}")
+
+            window.calculate()
+
+            app.processEvents()
+
+            solution = window.last_solution
+
+            if solution is None or not solution.reachable:
+                raise RuntimeError(
+                    f"{name}: {window.status_text()} {window.sub_label.text()}"
+                )
+
+            lines.append(
+                f"OK  {name}: {distance:.0f} m -> {solution.angle:.2f} deg"
+            )
+
+        window.close()
+
+        with open(log_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\nSELFTEST PASSED\n")
+
+        return 0
+
+    except Exception:
+        with open(log_path, "w", encoding="utf-8") as f:
+            f.write(traceback.format_exc() + "SELFTEST FAILED\n")
+
+        return 1
+
+
+def main():
+    if "--selftest" in sys.argv:
+        return selftest()
+
+    settings = load_config()
+
+    # Browser switches must be in place before QApplication exists.
+    configure_environment(settings["map_render"])
+
+    app = QApplication(sys.argv)
+
+    set_language(settings["language"])
+
+    install_crash_handler()
+
+    try:
+        weapons = load_weapons(
+            resource_path("weapons.json")
+        )
+    except WeaponDataError as e:
+        QMessageBox.critical(
+            None,
+            "Squad Ballistics",
+            str(e)
+        )
+        return 1
+
+    splash = SplashScreen()
+
+    splash.show()
+
+    close_build_splash()
 
     app.processEvents()
 
-    apply_update()
+    run_update(app, splash)
 
-window = MainWindow(weapons)
+    # Leftovers of the old folder version; in the background, it can take
+    # a moment.
+    threading.Thread(target=remove_old_install_files, daemon=True).start()
 
-window.show()
+    from crosshair import MainWindow
 
-splash.close()
+    window = MainWindow(weapons)
 
-sys.exit(app.exec())
+    window.show()
+
+    splash.close()
+
+    return app.exec()
+
+
+if __name__ == "__main__":
+    sys.exit(main())
