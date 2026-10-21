@@ -37,6 +37,9 @@
    ```
    Actions соберёт exe и опубликует релиз `v1.3.0` с `SquadBallistics.exe`
    и `SquadBallistics.zip`.
+   Если пушить теги нельзя: GitHub → Actions → **build-windows** →
+   *Run workflow*, выбрать ветку и включить **publish_release** — тег
+   `v<version.txt>` и релиз создаст сам Actions.
 5. Убедиться, что релиз появился и в нём оба файла.
 6. Только после этого влить ветку в **main** (Pull Request → Merge).
    С этого момента пользователи начнут получать обновление.
