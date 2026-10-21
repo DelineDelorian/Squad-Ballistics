@@ -1,6 +1,7 @@
 import os
 import sys
 import tempfile
+import threading
 import traceback
 
 os.environ["QT_LOGGING_RULES"] = "*.debug=false"
@@ -30,8 +31,24 @@ from splash import SplashScreen
 from updater import (
     check_for_updates,
     download_update,
-    apply_update
+    apply_update,
+    remove_old_install_files
 )
+
+from webmap import configure_environment
+
+
+def close_build_splash():
+    """Close the image PyInstaller shows while the .exe unpacks itself."""
+    try:
+        import pyi_splash
+    except ImportError:
+        return
+
+    try:
+        pyi_splash.close()
+    except Exception:
+        pass
 
 
 def run_update(app, splash):
@@ -116,13 +133,17 @@ def selftest():
     )
 
     try:
-        app = QApplication(sys.argv)
-
         # Never touch the user's real settings (last weapon, recent list).
         config.CONFIG_PATH = os.path.join(
             tempfile.mkdtemp(prefix="sb-selftest-"),
             "config.json"
         )
+
+        configure_environment("auto")
+
+        app = QApplication(sys.argv)
+
+        close_build_splash()
 
         weapons = load_weapons(
             resource_path("weapons.json")
@@ -187,9 +208,14 @@ def main():
     if "--selftest" in sys.argv:
         return selftest()
 
+    settings = load_config()
+
+    # Browser switches must be in place before QApplication exists.
+    configure_environment(settings["map_render"])
+
     app = QApplication(sys.argv)
 
-    set_language(load_config()["language"])
+    set_language(settings["language"])
 
     install_crash_handler()
 
@@ -209,9 +235,15 @@ def main():
 
     splash.show()
 
+    close_build_splash()
+
     app.processEvents()
 
     run_update(app, splash)
+
+    # Leftovers of the old folder version; in the background, it can take
+    # a moment.
+    threading.Thread(target=remove_old_install_files, daemon=True).start()
 
     from crosshair import MainWindow
 

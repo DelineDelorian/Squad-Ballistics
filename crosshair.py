@@ -1,11 +1,13 @@
 import copy
 import math
 import os
+import sys
 
 import qtawesome as qta
 
 from PyQt6.QtCore import (
     Qt,
+    QProcess,
     QSize,
     QTimer,
     QUrl
@@ -19,6 +21,7 @@ from PyQt6.QtGui import (
 )
 
 from PyQt6.QtWidgets import (
+    QApplication,
     QComboBox,
     QFrame,
     QGridLayout,
@@ -69,6 +72,8 @@ from updater import CURRENT_VERSION
 
 from utils import resource_path
 
+from webmap import MapPage, open_external
+
 from widgets import (
     CrosshairPreview,
     NumberEdit,
@@ -84,8 +89,6 @@ from widgets import (
     label,
     repolish
 )
-
-SQUADCALC_URL = "https://squadcalc.app/?map=AlBasrah"
 
 CROSSHAIR_COLORS = [
     "#00ff00",
@@ -174,7 +177,9 @@ class MainWindow(QMainWindow):
 
         self.current_steps = []
 
-        self.browser = None
+        # Created once and kept across UI rebuilds, so the map is not
+        # reloaded when the language or accent changes.
+        self.map_page = None
 
         self.overlay = Overlay(
             self.config
@@ -260,7 +265,10 @@ class MainWindow(QMainWindow):
             self.fov_entry.text()
         )
 
-        self.browser = None
+        if self.map_page is not None:
+            # Detach the map so it survives the old pages being deleted.
+            self.pages.removeWidget(self.map_page)
+            self.map_page.setParent(None)
 
         self.build_ui()
 
@@ -345,13 +353,17 @@ class MainWindow(QMainWindow):
         return sidebar
 
     def set_page(self, index):
+        if index == 3 and self.config["map_external"]:
+            open_external()
+            index = self.pages.currentIndex()
+
         self.pages.setCurrentIndex(index)
 
         for i, button in enumerate(self.nav_buttons):
             button.setChecked(i == index)
 
         if index == 3:
-            self.load_web_page()
+            self.map_page.ensure_loaded()
 
     # =========================
     # CALCULATOR PAGE
@@ -1172,6 +1184,7 @@ class MainWindow(QMainWindow):
         column.addWidget(self.build_interface_card())
         column.addWidget(self.build_calc_settings_card())
         column.addWidget(self.build_overlay_card())
+        column.addWidget(self.build_map_card())
         column.addWidget(self.build_hotkeys_card())
         column.addWidget(self.build_about_card())
 
@@ -1497,51 +1510,102 @@ class MainWindow(QMainWindow):
         self.save_timer.start()
 
     # =========================
-    # WEB PAGE
+    # MAP PAGE
     # =========================
 
     def build_web_page(self):
-        page = QWidget()
+        if self.map_page is None:
+            self.map_page = MapPage(self.config)
 
-        self.web_layout = QVBoxLayout(page)
+            self.map_page.compat_requested.connect(
+                lambda: self.set_map_render("software")
+            )
+        else:
+            self.map_page.retranslate()
 
-        self.web_layout.setContentsMargins(16, 16, 16, 16)
+        return self.map_page
 
-        return page
+    def build_map_card(self):
+        frame, layout = card()
 
-    def load_web_page(self):
-        """Create the embedded browser on first use (it is heavy)."""
-        if self.browser is not None:
+        layout.addWidget(label(tr("s_map"), "title"))
+
+        render = Segmented(
+            [
+                ("auto", tr("s_map_render_auto")),
+                ("software", tr("s_map_render_software"))
+            ],
+            self.config["map_render"]
+        )
+
+        render.changed.connect(self.set_map_render)
+
+        self.setting_row(layout, tr("s_map_render"), render)
+
+        hint = label(tr("s_map_render_hint"), "small")
+
+        hint.setWordWrap(True)
+
+        layout.addWidget(hint)
+
+        self.add_toggle(layout, tr("s_map_external"), "map_external")
+
+        clear_button = QPushButton(tr("s_map_clear"))
+
+        clear_button.setProperty("flat_style", True)
+
+        def clear_cache():
+            profile = self.map_page.profile if self.map_page else None
+
+            if profile is not None:
+                profile.clearHttpCache()
+
+            clear_button.setText(tr("s_map_cleared"))
+
+        clear_button.clicked.connect(clear_cache)
+
+        row = QHBoxLayout()
+
+        row.addWidget(clear_button)
+
+        row.addStretch()
+
+        layout.addLayout(row)
+
+        return frame
+
+    def set_map_render(self, mode):
+        if mode == self.config["map_render"]:
             return
 
-        try:
-            from PyQt6.QtWebEngineWidgets import QWebEngineView
-        except ImportError:
-            self.browser = False
+        self.config["map_render"] = mode
 
-            open_button = QPushButton(tr("web_open"))
+        save_config(self.config)
 
-            open_button.clicked.connect(
-                lambda: QDesktopServices.openUrl(QUrl(SQUADCALC_URL))
-            )
+        answer = QMessageBox.question(
+            self,
+            tr("restart_title"),
+            tr("restart_text")
+        )
 
-            self.web_layout.addStretch()
-            self.web_layout.addWidget(
-                label(tr("web_missing"), "muted"),
-                alignment=Qt.AlignmentFlag.AlignCenter
-            )
-            self.web_layout.addWidget(
-                open_button,
-                alignment=Qt.AlignmentFlag.AlignCenter
-            )
-            self.web_layout.addStretch()
-            return
+        if answer == QMessageBox.StandardButton.Yes:
+            self.restart()
+        else:
+            self.rebuild()
 
-        self.browser = QWebEngineView()
+    def restart(self):
+        """Start a new instance and quit (Chromium flags need a restart)."""
+        if getattr(sys, "frozen", False):
+            program, arguments = sys.executable, sys.argv[1:]
+        else:
+            program = sys.executable
+            arguments = [os.path.abspath(sys.argv[0])] + sys.argv[1:]
 
-        self.browser.load(QUrl(SQUADCALC_URL))
+        self.close()
 
-        self.web_layout.addWidget(self.browser)
+        QProcess.startDetached(program, arguments)
+
+        QApplication.quit()
 
     def closeEvent(self, event):
         if self.save_timer.isActive():
@@ -1550,6 +1614,9 @@ class MainWindow(QMainWindow):
         save_config(self.config)
 
         teardown_hotkeys(self)
+
+        if self.map_page is not None:
+            self.map_page.shutdown()
 
         self.overlay.close()
 

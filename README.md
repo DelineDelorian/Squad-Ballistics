@@ -120,6 +120,14 @@ Hotkeys can be changed in **Settings**. On Windows they are global, so they work
 
 If the mark is slightly off in your setup, adjust **Offset calibration** in Settings. / Если метка немного не совпадает, подстройте **Калибровку смещения** в настройках.
 
+### Map / Карта
+
+The map tab embeds [SquadCalc](https://squadcalc.app). Map tiles are cached on disk, so a map you have opened loads instantly next time. / Вкладка карты встраивает SquadCalc; тайлы кэшируются на диске.
+
+* **Black map / чёрная карта:** the app offers **Compatibility mode** (draws without the GPU) when the map looks black; it can also be switched in Settings → Map. / Если карта чёрная, программа предложит **режим совместимости** (Настройки → Карта).
+* **Does not load / не грузится:** press **Retry** or **Open in browser**; Settings → Map → *Open the map in the regular browser* makes that the default. / Кнопки **Повторить** и **Открыть в браузере**; в настройках можно всегда открывать карту в обычном браузере.
+* The embedded browser does not use QUIC, Encrypted Client Hello or secure DNS, which networks with blocking (e.g. in Russia) break. / Встроенный браузер не использует QUIC, ECH и защищённый DNS, которые ломаются в сетях с блокировками.
+
 ## Features / Возможности
 
 * 52 standard weapons in 8 groups plus 7 popular mod weapons (hidden by default). / 52 стандартных вида оружия в 8 группах и 7 модовых (по умолчанию скрыты).
@@ -174,7 +182,7 @@ irm https://raw.githubusercontent.com/DelineDelorian/Squad-Ballistics/refs/heads
 |------|---------------------------|
 | `setup.bat` | Installs Python (if missing) and dependencies — установка |
 | `run.bat` | Runs the app from source — запуск без сборки |
-| `build.bat` | Builds and self-checks `dist\SquadBallistics\SquadBallistics.exe` — сборка exe |
+| `build.bat` | Builds and self-checks the single-file `dist\SquadBallistics.exe` — сборка exe |
 | `test.bat` | Runs the tests — тесты |
 
 Manual / вручную:
@@ -194,4 +202,12 @@ Every push builds the exe on GitHub Actions (**build-windows**, see
 *Artifacts*) без публикации релиза. Как выпустить обновление:
 [RELEASING.md](RELEASING.md).
 
-User settings are stored in `%APPDATA%\SquadBallistics\config.json`. The old `configs/config.json` is migrated automatically.
+The app is a single `SquadBallistics.exe` and writes nothing next to it. / Программа — один файл `SquadBallistics.exe`, рядом с ним ничего не создаётся:
+
+| What / Что | Where / Где |
+|------------|-------------|
+| Settings / настройки, `crash.log` | `%APPDATA%\SquadBallistics` |
+| Map cache, SquadCalc settings / кэш карты | `%LOCALAPPDATA%\SquadBallistics\WebEngine` |
+| Update download / загрузка обновления | `%TEMP%\SquadBallisticsUpdate` |
+
+The old `configs/config.json` of versions ≤ 1.1.0 is migrated automatically, and their leftover `_internal` folder is removed after updating.

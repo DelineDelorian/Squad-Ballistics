@@ -1,8 +1,8 @@
 name: build-windows
 
-# Builds SquadBallistics.exe on Windows and uploads it as a downloadable
-# artifact (Actions -> run -> Artifacts). This does NOT publish a release,
-# so users' auto-updater is not affected.
+# Builds the single-file SquadBallistics.exe on Windows and uploads it as a
+# downloadable artifact (Actions -> run -> Artifacts). This does NOT publish
+# a release, so users' auto-updater is not affected.
 #
 # A release is published only when a tag like v1.2.0 is pushed
 # (see RELEASING.md).
@@ -13,10 +13,13 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
 
@@ -41,29 +44,38 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         shell: pwsh
         run: |
-          $p = Start-Process dist\SquadBallistics\SquadBallistics.exe -ArgumentList "--selftest" -Wait -PassThru
-          Get-Content dist\SquadBallistics\selftest.log
-          Remove-Item dist\SquadBallistics\selftest.log
+          $p = Start-Process dist\SquadBallistics.exe -ArgumentList "--selftest" -Wait -PassThru
+          Get-Content dist\selftest.log
+          Remove-Item dist\selftest.log
           if ($p.ExitCode -ne 0) { exit 1 }
+          $files = Get-ChildItem dist | Select-Object -ExpandProperty Name
+          if ($files -ne "SquadBallistics.exe") { Write-Error "Unexpected files in dist: $files"; exit 1 }
+          "{0:N0} MB" -f ((Get-Item dist\SquadBallistics.exe).Length / 1MB)
 
       - name: Upload exe
         uses: actions/upload-artifact@v4
         with:
           name: SquadBallistics-${{ github.sha }}
-          path: dist/
+          path: dist/SquadBallistics.exe
           retention-days: 14
 
-      - name: Pack release zip
+      # Versions up to 1.1.0 update by downloading SquadBallistics.zip and
+      # copying its "SquadBallistics" folder over the installed one. This zip
+      # carries the new single .exe in that layout, so they update too.
+      - name: Pack update zip for old versions
         if: startsWith(github.ref, 'refs/tags/v')
         shell: pwsh
-        run: Compress-Archive -Path dist\SquadBallistics -DestinationPath SquadBallistics.zip
+        run: |
+          New-Item -ItemType Directory -Force legacy\SquadBallistics | Out-Null
+          Copy-Item dist\SquadBallistics.exe legacy\SquadBallistics\
+          Compress-Archive -Path legacy\SquadBallistics -DestinationPath SquadBallistics.zip
 
       - name: Publish release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: SquadBallistics.zip
-          generate_release_notes: true
-
-permissions:
-  contents: write
+          name: Squad Ballistics ${{ github.ref_name }}
+          body_path: RELEASE_NOTES.md
+          files: |
+            dist/SquadBallistics.exe
+            SquadBallistics.zip

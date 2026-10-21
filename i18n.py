@@ -197,11 +197,67 @@ STRINGS = {
         "Сбросить все настройки прицела и программы?",
         "Reset all crosshair and app settings?"
     ),
-    "web_missing": (
-        "Встроенный браузер недоступен (не установлен PyQt6-WebEngine).",
-        "Embedded browser is not available (PyQt6-WebEngine is not installed)."
+    # Map page
+    "map_loading": ("Загрузка карты…", "Loading the map…"),
+    "map_reload": ("Обновить", "Reload"),
+    "map_retry": ("Повторить", "Retry"),
+    "map_compat_button": ("Режим совместимости", "Compatibility mode"),
+    "map_compat_on": ("режим совместимости", "compatibility mode"),
+    "map_failed_title": ("Карта не загрузилась", "The map did not load"),
+    "map_failed_text": (
+        "Нет связи с squadcalc.app. Проверьте интернет и нажмите «Повторить». "
+        "Если в обычном браузере сайт открывается — откройте карту там.",
+        "Could not reach squadcalc.app. Check your connection and press "
+        "Retry. If the site opens in your regular browser, use it there."
     ),
-    "web_open": ("Открыть SquadCalc в браузере", "Open SquadCalc in browser"),
+    "map_slow_title": ("Карта грузится слишком долго", "The map takes too long"),
+    "map_slow_text": (
+        "Сайт отвечает очень медленно или соединение блокируется. Подождите, "
+        "нажмите «Повторить» или откройте карту в обычном браузере.",
+        "The site responds very slowly or the connection is blocked. Wait, "
+        "press Retry or open the map in your regular browser."
+    ),
+    "map_crashed_title": ("Карта перестала отвечать", "The map stopped responding"),
+    "map_crashed_text": (
+        "Встроенный браузер закрылся с ошибкой. Нажмите «Повторить». Если это "
+        "повторяется — включите режим совместимости.",
+        "The embedded browser crashed. Press Retry. If it keeps happening, "
+        "turn on compatibility mode."
+    ),
+    "map_black_title": ("Карта чёрная?", "Is the map black?"),
+    "map_black_text": (
+        "Похоже, видеокарта не рисует встроенный браузер. Режим совместимости "
+        "рисует карту без видеокарты (программа перезапустится).",
+        "Your graphics driver does not seem to draw the embedded browser. "
+        "Compatibility mode draws the map without the GPU (the app restarts)."
+    ),
+    "map_missing_title": ("Встроенная карта недоступна", "Embedded map unavailable"),
+    "map_missing_text": (
+        "В этой сборке нет встроенного браузера. Откройте карту в обычном "
+        "браузере.",
+        "This build has no embedded browser. Open the map in your regular "
+        "browser."
+    ),
+    "s_map": ("Карта", "Map"),
+    "s_map_render": ("Отрисовка карты", "Map rendering"),
+    "s_map_render_auto": ("Обычная", "Normal"),
+    "s_map_render_software": ("Совместимая", "Compatible"),
+    "s_map_render_hint": (
+        "Совместимая — если карта чёрная или мерцает: рисует без видеокарты, "
+        "чуть медленнее. Изменение применяется после перезапуска.",
+        "Compatible — if the map is black or flickers: draws without the GPU, "
+        "a bit slower. Applied after a restart."
+    ),
+    "s_map_external": ("Открывать карту в обычном браузере", "Open the map in the regular browser"),
+    "s_map_clear": ("Очистить кэш карты", "Clear map cache"),
+    "s_map_cleared": ("Кэш очищен", "Cache cleared"),
+    "restart_title": ("Перезапуск", "Restart"),
+    "restart_text": (
+        "Перезапустить программу сейчас, чтобы применить изменения?",
+        "Restart the app now to apply the change?"
+    ),
+
+    "web_open": ("Открыть в браузере", "Open in browser"),
 }
 
 _language = "en"

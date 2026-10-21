@@ -12,9 +12,9 @@ from ballistics import load_weapons, solve
 from conftest import ROOT
 
 
-@pytest.fixture(scope="module")
-def app():
-    return QApplication.instance() or QApplication([])
+@pytest.fixture
+def app(qapp):
+    return qapp
 
 
 @pytest.fixture
@@ -296,3 +296,59 @@ def test_selftest_does_not_touch_user_config(tmp_path):
     assert result.returncode == 0, text
     assert "SELFTEST PASSED" in text
     assert not (tmp_path / "cfg" / "SquadBallistics" / "config.json").exists()
+
+
+def test_map_page_survives_rebuild(window, monkeypatch):
+    pytest.importorskip("PyQt6.QtWebEngineWidgets")
+
+    window.set_page(3)
+
+    page = window.map_page
+    view = page.view
+
+    assert view is not None
+    assert view.page().requestedUrl().host() == "squadcalc.app"
+    assert window.pages.currentIndex() == 3
+
+    window.set_language("en")
+
+    assert window.map_page is page
+    assert window.map_page.view is view
+    assert window.pages.currentIndex() == 3
+    assert page.reload_button.text() == "Reload"
+
+
+def test_map_help_panel_and_external_mode(window, monkeypatch):
+    opened = []
+    monkeypatch.setattr("crosshair.open_external", lambda: opened.append(1))
+
+    window.set_page(1)
+    window.config["map_external"] = True
+    window.set_page(3)
+
+    assert opened == [1]
+    assert window.pages.currentIndex() == 1
+
+    page = window.map_page
+    page.show_panel("slow")
+    assert page.panel.isVisibleTo(window) or not window.isVisible()
+    assert page.panel_title.text()
+    assert page.compat_button.isVisibleTo(page.panel)
+
+    window.config["map_render"] = "software"
+    page.show_panel("black")
+    assert not page.compat_button.isVisibleTo(page.panel)
+
+
+def test_switching_map_render_asks_for_restart(window, monkeypatch):
+    from PyQt6.QtWidgets import QMessageBox
+
+    monkeypatch.setattr(
+        QMessageBox, "question",
+        lambda *a, **k: QMessageBox.StandardButton.No
+    )
+
+    window.set_map_render("software")
+
+    assert window.config["map_render"] == "software"
+    assert config.load_config()["map_render"] == "software"
