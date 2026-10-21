@@ -7,6 +7,8 @@ from PyQt6.QtWidgets import (
     QProgressBar
 )
 
+from i18n import tr
+
 
 class SplashScreen(QWidget):
     def __init__(self):
@@ -47,7 +49,7 @@ class SplashScreen(QWidget):
         layout.addWidget(title)
 
         self.status = QLabel(
-            "Checking updates..."
+            tr("splash_checking")
         )
 
         self.status.setStyleSheet("""

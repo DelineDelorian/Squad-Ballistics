@@ -264,16 +264,14 @@ def solve(weapon, distance, height_diff=0.0, arc=None):
         return result
 
     g = weapon.g
-    v = weapon.velocity_at(math.hypot(distance, height_diff))
-    result.velocity = v
 
     if g == 0:
-        # No gravity: the projectile flies straight.
+        # No gravity: the projectile flies straight along the line of sight.
+        v = weapon.velocity_at(math.hypot(distance, height_diff))
         rad = math.atan2(height_diff, distance)
         raw = {"low": rad, "high": rad}
     else:
         v = weapon.velocity_at(distance)
-        result.velocity = v
 
         discriminant = (
             v ** 4 - g * (g * distance ** 2 + 2 * height_diff * v ** 2)
@@ -293,6 +291,8 @@ def solve(weapon, distance, height_diff=0.0, arc=None):
             "low": math.atan((v ** 2 - root) / (g * distance)),
             "high": math.atan((v ** 2 + root) / (g * distance)),
         }
+
+    result.velocity = v
 
     low_limit, high_limit = weapon.elevation_limits
 

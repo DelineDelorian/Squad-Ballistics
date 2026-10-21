@@ -1,11 +1,12 @@
 """Reusable widgets for the main window."""
 
+import re
 
 from PyQt6.QtCore import (
     Qt,
+    QEvent,
     QPointF,
     QRectF,
-    QRegularExpression,
     QSize,
     pyqtSignal
 )
@@ -13,11 +14,12 @@ from PyQt6.QtCore import (
 from PyQt6.QtGui import (
     QColor,
     QFont,
+    QGuiApplication,
     QLinearGradient,
     QPainter,
     QPainterPath,
     QPen,
-    QRegularExpressionValidator
+    QValidator
 )
 
 from PyQt6.QtWidgets import (
@@ -36,6 +38,7 @@ from PyQt6.QtWidgets import (
 )
 
 import theme
+from ballistics import MILS_PER_DEGREE
 from i18n import tr, category_name
 from overlay import paint_crosshair
 
@@ -157,15 +160,55 @@ class Segmented(QFrame):
 
             self.buttons[key] = button
 
-    def set_current(self, key):
-        if key in self.buttons:
-            self.buttons[key].setChecked(True)
+
+class NumberValidator(QValidator):
+    """Validates a decimal number and normalises what the user typed.
+
+    With a Russian keyboard layout the "." and "," keys produce "ю" and "б",
+    and the numpad decimal key produces ",". All of them become ".", so a
+    fractional number can be typed on any layout. A typographic minus is
+    accepted as "-".
+    """
+
+    SEPARATORS = ",юбЮБ"
+    MINUSES = "−–—"
+
+    def __init__(self, allow_negative, parent=None):
+        super().__init__(parent)
+
+        sign = "-?" if allow_negative else ""
+
+        self.pattern = re.compile(rf"{sign}\d{{0,6}}(\.\d{{0,3}})?")
+
+    def normalize(self, text):
+        for char in self.SEPARATORS:
+            text = text.replace(char, ".")
+
+        for char in self.MINUSES:
+            text = text.replace(char, "-")
+
+        return text.replace(" ", "").lstrip("+")
+
+    def validate(self, text, pos):
+        normalized = self.normalize(text)
+
+        # Keep the cursor where it was relative to the remaining characters.
+        pos = len(self.normalize(text[:pos]))
+
+        if not self.pattern.fullmatch(normalized):
+            return QValidator.State.Invalid, text, pos
+
+        if normalized in ("", "-", ".", "-."):
+            return QValidator.State.Intermediate, normalized, pos
+
+        return QValidator.State.Acceptable, normalized, pos
 
 
 class NumberEdit(QLineEdit):
-    """Line edit for numbers; the mouse wheel steps the value.
+    """Line edit for numbers.
 
-    Wheel: +/- step, Shift: x0.1, Ctrl: x10. Accepts a decimal comma.
+    Accepts "." or "," on any keyboard layout. The mouse wheel steps the
+    value (Shift: x0.1, Ctrl: x10); "-" anywhere flips the sign.
     """
 
     stepped = pyqtSignal()
@@ -177,36 +220,51 @@ class NumberEdit(QLineEdit):
 
         self.allow_negative = allow_negative
 
-        sign = "-?" if allow_negative else ""
-
-        self.setValidator(
-            QRegularExpressionValidator(
-                QRegularExpression(rf"^{sign}\d{{0,6}}([.,]\d{{0,3}})?$")
-            )
-        )
+        self.setValidator(NumberValidator(allow_negative, self))
 
     def value(self, default=None):
+        """The number, or `default` while the field is empty/incomplete."""
         text = self.text().strip().replace(",", ".")
 
-        if not text or text in ("-", "."):
+        try:
+            return float(text)
+        except ValueError:
             return default
-
-        return float(text)
 
     def set_value(self, value):
         self.setText(f"{value:g}")
 
     def add(self, delta):
-        current = self.value(0.0) or 0.0
-
-        value = round(current + delta, 3)
+        value = round((self.value() or 0.0) + delta, 3)
 
         if not self.allow_negative:
             value = max(0.0, value)
 
         self.set_value(value)
 
-        self.stepped.emit()
+    def keyPressEvent(self, event):
+        flip = (
+            self.allow_negative
+            and event.text() in ("-",) + tuple(NumberValidator.MINUSES)
+            and self.cursorPosition() > 0
+            and self.value() is not None
+        )
+
+        if flip:
+            text = self.text()
+            position = self.cursorPosition()
+
+            if text.startswith("-"):
+                self.setText(text[1:])
+                self.setCursorPosition(position - 1)
+            else:
+                self.setText("-" + text)
+                self.setCursorPosition(position + 1)
+
+            self.textEdited.emit(self.text())
+            return
+
+        super().keyPressEvent(event)
 
     def wheelEvent(self, event):
         steps = event.angleDelta().y() / 120
@@ -224,6 +282,8 @@ class NumberEdit(QLineEdit):
             step = step * 10
 
         self.add(steps * step)
+
+        self.stepped.emit()
 
         event.accept()
 
@@ -249,6 +309,8 @@ class _PickerPopup(QFrame):
         self.search.textChanged.connect(self.refill)
 
         self.search.returnPressed.connect(self.pick_current)
+
+        self.search.installEventFilter(self)
 
         self.list = QListWidget()
 
@@ -336,13 +398,33 @@ class _PickerPopup(QFrame):
         if item is not None:
             self.pick_item(item)
 
-    def keyPressEvent(self, event):
-        if event.key() in (Qt.Key.Key_Down, Qt.Key.Key_Up):
-            self.list.setFocus()
-            self.list.keyPressEvent(event)
-            return
+    def move_selection(self, direction):
+        """Move to the next selectable row, skipping category headers."""
+        row = self.list.currentRow()
 
-        super().keyPressEvent(event)
+        while True:
+            row += direction
+
+            if not 0 <= row < self.list.count():
+                return
+
+            item = self.list.item(row)
+
+            if item.flags() & Qt.ItemFlag.ItemIsSelectable:
+                self.list.setCurrentItem(item)
+                return
+
+    def eventFilter(self, watched, event):
+        if watched is self.search and event.type() == QEvent.Type.KeyPress:
+            if event.key() == Qt.Key.Key_Down:
+                self.move_selection(1)
+                return True
+
+            if event.key() == Qt.Key.Key_Up:
+                self.move_selection(-1)
+                return True
+
+        return super().eventFilter(watched, event)
 
 
 class WeaponPicker(QPushButton):
@@ -385,7 +467,26 @@ class WeaponPicker(QPushButton):
 
         self.popup.resize(width, 440)
 
-        self.popup.move(self.mapToGlobal(self.rect().bottomLeft()))
+        # Below the button, but kept inside the screen.
+        position = self.mapToGlobal(self.rect().bottomLeft())
+
+        screen = QGuiApplication.screenAt(position)
+
+        if screen is not None:
+            area = screen.availableGeometry()
+
+            if position.y() + self.popup.height() > area.bottom():
+                position.setY(
+                    max(area.top(), position.y() - self.height()
+                        - self.popup.height())
+                )
+
+            position.setX(
+                max(area.left(),
+                    min(position.x(), area.right() - self.popup.width()))
+            )
+
+        self.popup.move(position)
 
         self.popup.show()
 
@@ -407,6 +508,8 @@ class Swatches(QWidget):
         layout.setSpacing(8)
 
         self.group = QButtonGroup(self)
+
+        self.buttons = {}
 
         for color in colors:
             button = QPushButton()
@@ -431,7 +534,18 @@ class Swatches(QWidget):
 
             layout.addWidget(button)
 
+            self.buttons[color.lower()] = button
+
         layout.addStretch()
+
+    def set_current(self, color):
+        """Check the matching swatch, or none for a custom color."""
+        self.group.setExclusive(False)
+
+        for key, button in self.buttons.items():
+            button.setChecked(key == color.lower())
+
+        self.group.setExclusive(True)
 
 
 class SliderRow(QWidget):
@@ -615,7 +729,7 @@ class TrajectoryView(QWidget):
             painter.drawText(
                 QRectF(apex_point.x() - 60, apex_point.y() - 18, 120, 14),
                 Qt.AlignmentFlag.AlignCenter,
-                f"{apex[1]:.0f} m"
+                f"{apex[1]:.0f} {tr('unit_m')}"
             )
 
         # Weapon and target
@@ -637,7 +751,7 @@ class TrajectoryView(QWidget):
         painter.drawText(
             QRectF(rect.left(), rect.bottom() + 4, rect.width(), 14),
             Qt.AlignmentFlag.AlignRight,
-            f"{self.target[0]:.0f} m"
+            f"{self.target[0]:.0f} {tr('unit_m')}"
         )
 
 
@@ -681,6 +795,6 @@ class CrosshairPreview(QWidget):
 
 def format_angle(degrees, unit):
     if unit == "mil":
-        return f"{degrees * 6400 / 360:.0f} {tr('mil')}"
+        return f"{degrees * MILS_PER_DEGREE:.0f} {tr('mil')}"
     return f"{degrees:.2f}°"
 

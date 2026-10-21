@@ -1,5 +1,6 @@
 import os
 import sys
+import tempfile
 import traceback
 
 os.environ["QT_LOGGING_RULES"] = "*.debug=false"
@@ -20,7 +21,9 @@ from ballistics import (
     WeaponDataError
 )
 
-from config import config_dir
+import config
+from config import config_dir, load_config
+from i18n import set_language, tr
 from utils import resource_path
 from splash import SplashScreen
 
@@ -38,7 +41,7 @@ def run_update(app, splash):
         return
 
     splash.status.setText(
-        f"Downloading {update}..."
+        tr("splash_downloading", v=update)
     )
 
     def progress(percent):
@@ -54,7 +57,7 @@ def run_update(app, splash):
         download_update(progress)
 
         splash.status.setText(
-            "Installing..."
+            tr("splash_installing")
         )
 
         app.processEvents()
@@ -66,7 +69,7 @@ def run_update(app, splash):
         splash.progress.setRange(0, 100)
 
         splash.status.setText(
-            f"Update failed: {e}"
+            tr("splash_failed", e=e)
         )
 
         app.processEvents()
@@ -93,8 +96,8 @@ def install_crash_handler():
         if QApplication.instance():
             QMessageBox.critical(
                 None,
-                "Squad Ballistics — error",
-                f"{exc}\n\nDetails saved to:\n{log_path}"
+                tr("error_title"),
+                f"{exc}\n\n" + tr("error_saved", path=log_path)
             )
 
     sys.excepthook = handler
@@ -114,6 +117,12 @@ def selftest():
 
     try:
         app = QApplication(sys.argv)
+
+        # Never touch the user's real settings (last weapon, recent list).
+        config.CONFIG_PATH = os.path.join(
+            tempfile.mkdtemp(prefix="sb-selftest-"),
+            "config.json"
+        )
 
         weapons = load_weapons(
             resource_path("weapons.json")
@@ -179,6 +188,8 @@ def main():
         return selftest()
 
     app = QApplication(sys.argv)
+
+    set_language(load_config()["language"])
 
     install_crash_handler()
 

@@ -172,8 +172,17 @@ class Overlay(QWidget):
     def center_y(self):
         return self.height() / 2 + self.config.get("center_offset_y", 0)
 
+    # Distance from the screen edge inside which the mark is still drawn.
+    EDGE_MARGIN = 20
+
     def screen_width(self):
         return self.width()
+
+    def is_offscreen(self, offset):
+        """Whether the aim mark for `offset` falls outside the screen."""
+        y = self.center_y + offset
+
+        return not self.EDGE_MARGIN <= y <= self.height() - self.EDGE_MARGIN
 
     def set_info(self, text):
         self.info_text = text
@@ -233,13 +242,15 @@ class Overlay(QWidget):
         x = self.center_x
         y = self.center_y + self.offset
 
-        margin = 20
-
-        if not margin <= y <= self.height() - margin:
+        if self.is_offscreen(self.offset):
             # The aim point is off-screen (very high angle shot):
             # show an arrow on the edge pointing towards it.
-            self.draw_edge_arrow(painter, color, x, y < margin)
-            y = margin + 30 if y < margin else self.height() - margin - 30
+            top = y < self.EDGE_MARGIN
+
+            self.draw_edge_arrow(painter, color, x, top)
+
+            # Keep the label next to the arrow.
+            y = 50 if top else self.height() - 50
         else:
             paint_crosshair(painter, cfg, x, y)
 

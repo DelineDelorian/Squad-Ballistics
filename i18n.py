@@ -34,7 +34,6 @@ STRINGS = {
     "ready": ("Введите дистанцию", "Enter the distance"),
     "unreachable": ("Недостижимо", "Unreachable"),
     "enter_distance": ("Введите дистанцию", "Enter the distance"),
-    "bad_number": ("Неверное число: {name}", "Invalid number: {name}"),
     "bad_fov": ("FOV должен быть от 1 до 179", "FOV must be between 1 and 179"),
     "bad_distance": ("Дистанция должна быть больше 0", "Distance must be greater than 0"),
 
@@ -42,7 +41,7 @@ STRINGS = {
     "stat_apex": ("Высота подъёма", "Apex"),
     "stat_offset": ("Смещение метки", "Mark offset"),
     "stat_impact": ("Угол падения", "Impact angle"),
-    "stat_velocity": ("Скорость", "Velocity"),
+    "stat_velocity": ("Средняя скорость", "Avg. velocity"),
     "stat_alt": ("Другая траектория", "Other arc"),
     "off_screen": ("за экраном", "off-screen"),
     "unit_s": ("с", "s"),
@@ -52,11 +51,12 @@ STRINGS = {
     "mil": ("мил", "mil"),
 
     "how_to": ("Как стрелять", "How to fire"),
+    "how_overlay_on": ("Включите оверлей ({hotkey}).", "Turn the overlay on ({hotkey})."),
     "how_overlay_1": (
-        "Включите оверлей (F8). Совместите метку оверлея с целью — ствол "
-        "окажется поднят ровно на {angle}.",
-        "Turn the overlay on (F8). Put the overlay mark on the target — the "
-        "barrel is then raised by exactly {angle}."
+        "Совместите метку оверлея с целью — ствол окажется поднят ровно "
+        "на {angle}.",
+        "Put the overlay mark on the target — the barrel is then raised by "
+        "exactly {angle}."
     ),
     "how_overlay_2": (
         "FOV в игре должен быть {fov}°. Через оптику — укажите FOV прицела.",
@@ -120,6 +120,14 @@ STRINGS = {
     "cat_indirect": ("Непрямой огонь", "Indirect fire"),
     "cat_mods": ("Моды", "Mods"),
     "cat_other": ("Другое", "Other"),
+
+    # Splash / updates
+    "splash_checking": ("Проверка обновлений…", "Checking for updates…"),
+    "splash_downloading": ("Загрузка {v}…", "Downloading {v}…"),
+    "splash_installing": ("Установка…", "Installing…"),
+    "splash_failed": ("Не удалось обновиться: {e}", "Update failed: {e}"),
+    "error_title": ("Squad Ballistics — ошибка", "Squad Ballistics — error"),
+    "error_saved": ("Подробности сохранены в:\n{path}", "Details saved to:\n{path}"),
 
     # Crosshair page
     "presets": ("Пресеты", "Presets"),
@@ -219,11 +227,11 @@ def language():
     return _language
 
 
-def tr(key, **values):
-    pair = STRINGS.get(key)
+def tr(string_id, /, **values):
+    pair = STRINGS.get(string_id)
 
     if pair is None:
-        text = key
+        text = string_id
     else:
         text = pair[0] if _language == "ru" else pair[1]
 

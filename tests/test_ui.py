@@ -54,7 +54,7 @@ def test_every_weapon_through_ui(window):
         assert window.last_solution is not None, name
         assert window.last_solution.reachable, (name, window.status_text())
         assert any(c in window.status_text() for c in ("°", "mil", "мил"))
-        assert window.steps_layout.count() >= 2, name
+        assert len(window.current_steps) >= 2, name
 
         expected = window.current_offset()
         if abs(expected) < window.overlay.height():
@@ -182,3 +182,117 @@ def test_hotkey_rebinding(window):
     window.set_hotkey("reset_offset", "PgUp")
     assert window.config["hotkeys"]["reset_offset"] == "PgUp"
     assert window.config["hotkeys"]["distance_up"] == ""
+
+
+def type_text(widget, text):
+    """Send key presses like a real keyboard, including Cyrillic layouts."""
+    from PyQt6.QtCore import Qt
+    from PyQt6.QtGui import QKeyEvent
+
+    widget.setFocus()
+
+    for char in text:
+        for kind in (QKeyEvent.Type.KeyPress, QKeyEvent.Type.KeyRelease):
+            QApplication.sendEvent(
+                widget,
+                QKeyEvent(kind, 0, Qt.KeyboardModifier.NoModifier, char)
+            )
+
+
+@pytest.mark.parametrize("typed, expected", [
+    ("2.5", "2.5"),
+    ("-2.5", "-2.5"),
+    ("2,5", "2.5"),
+    ("2ю5", "2.5"),       # "." key on a Russian layout
+    ("-2б75", "-2.75"),   # "," key on a Russian layout
+    ("−3.5", "-3.5"),     # typographic minus
+    ("+4", "4"),
+    ("1.2345", "1.234"),  # at most 3 decimals
+    ("abc7", "7"),
+])
+def test_height_accepts_fractions_on_any_layout(window, typed, expected):
+    window.height_entry.clear()
+
+    type_text(window.height_entry, typed)
+
+    assert window.height_entry.text() == expected
+    assert window.height_entry.value() == pytest.approx(float(expected))
+
+
+def test_minus_flips_sign_and_distance_has_no_sign(window):
+    window.height_entry.setText("12.5")
+    window.height_entry.setCursorPosition(4)
+
+    type_text(window.height_entry, "-")
+    assert window.height_entry.text() == "-12.5"
+
+    type_text(window.height_entry, "-")
+    assert window.height_entry.text() == "12.5"
+
+    window.distance_entry.clear()
+    type_text(window.distance_entry, "-300ю5")
+    assert window.distance_entry.text() == "300.5"
+
+
+def test_typed_height_reaches_the_solution(window):
+    window.select_weapon("SPG-9 · HEAT")
+    window.distance_entry.setText("400")
+    window.fov_entry.setText("90")
+    window.height_entry.clear()
+
+    type_text(window.height_entry, "-7ю25")
+    window.calculate()
+
+    assert window.last_solution.height_diff == pytest.approx(-7.25)
+
+
+def test_offscreen_follows_center_offset(window):
+    overlay = window.overlay
+    edge = overlay.height() / 2 - overlay.EDGE_MARGIN
+
+    window.config["center_offset_y"] = 0
+    assert not overlay.is_offscreen(edge - 1)
+
+    window.config["center_offset_y"] = 50
+    assert overlay.is_offscreen(edge - 1)
+
+
+def test_overlay_hint_uses_bound_key(window):
+    window.select_weapon("SPG-9 · HEAT")
+    window.distance_entry.setText("400")
+    window.fov_entry.setText("90")
+    window.calculate()
+
+    assert "F8" in window.current_steps[0]
+
+    window.config["hotkeys"]["toggle_overlay"] = ""
+    window.calculate()
+    assert "F8" not in window.current_steps[0]
+
+
+def test_selftest_does_not_touch_user_config(tmp_path):
+    import subprocess
+    import sys
+
+    env = dict(os.environ)
+    env["XDG_CONFIG_HOME"] = str(tmp_path / "cfg")
+    env["APPDATA"] = str(tmp_path / "cfg")
+    env["QT_QPA_PLATFORM"] = "offscreen"
+
+    result = subprocess.run(
+        [sys.executable, os.path.join(ROOT, "app.py"), "--selftest"],
+        cwd=tmp_path,
+        env=env,
+        timeout=120,
+    )
+
+    log = os.path.join(ROOT, "selftest.log")
+    try:
+        with open(log, encoding="utf-8") as f:
+            text = f.read()
+    finally:
+        os.remove(log)
+
+    assert result.returncode == 0, text
+    assert "SELFTEST PASSED" in text
+    assert not (tmp_path / "cfg" / "SquadBallistics" / "config.json").exists()

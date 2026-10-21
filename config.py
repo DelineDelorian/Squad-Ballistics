@@ -1,6 +1,7 @@
 import copy
 import json
 import os
+import re
 import sys
 
 APP_NAME = "SquadBallistics"
@@ -74,6 +75,35 @@ DEFAULT_CONFIG = {
     }
 }
 
+# Allowed values. RANGES are also the limits of the sliders in the UI.
+CHOICES = {
+    "language": ("auto", "ru", "en"),
+    "arc": ("auto", "low", "high"),
+    "unit_mode": ("auto", "deg", "mil"),
+    "outline_color": ("white", "black"),
+}
+
+RANGES = {
+    "fov": (1, 179),
+    "fps": (10, 240),
+    "opacity": (20, 255),
+    "dot_size": (1, 20),
+    "line_length": (1, 40),
+    "line_gap": (0, 30),
+    "line_thickness": (1, 10),
+    "outline_thickness": (1, 5),
+    "circle_radius": (5, 80),
+    "offset_scale": (50, 150),
+    "monitor": (0, 15),
+    "center_offset_x": (-300, 300),
+    "center_offset_y": (-300, 300),
+    "distance_step": (1, 100),
+}
+
+DISTANCE_STEPS = (1, 5, 10, 25, 50, 100)
+
+_HEX_COLOR = re.compile(r"#[0-9a-fA-F]{6}")
+
 
 def config_dir():
     if sys.platform == "win32":
@@ -128,9 +158,19 @@ def _merge(loaded):
                 config[key] = value
         elif isinstance(default, (int, float)):
             if isinstance(value, (int, float)) and not isinstance(value, bool):
+                low, high = RANGES.get(key, (-float("inf"), float("inf")))
+                config[key] = max(low, min(high, value))
+        elif key in CHOICES:
+            if value in CHOICES[key]:
+                config[key] = value
+        elif key == "accent":
+            if isinstance(value, str) and _HEX_COLOR.fullmatch(value):
                 config[key] = value
         elif isinstance(value, type(default)):
             config[key] = value
+
+    if config["distance_step"] not in DISTANCE_STEPS:
+        config["distance_step"] = DEFAULT_CONFIG["distance_step"]
 
     return config
 

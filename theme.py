@@ -85,15 +85,6 @@ def stylesheet(accent):
         font-size: 15px;
     }}
 
-    QLabel[role="chip"] {{
-        background: {SURFACE_2};
-        border: 1px solid {BORDER};
-        border-radius: 9px;
-        color: {MUTED};
-        font-size: 11px;
-        padding: 2px 8px;
-    }}
-
     QLabel[role="stat_value"] {{
         font-size: 16px;
         font-weight: 600;
@@ -261,23 +252,6 @@ def stylesheet(accent):
         height: 14px;
         margin: -5px 0;
         border-radius: 7px;
-    }}
-
-    QCheckBox {{
-        spacing: 10px;
-        background: transparent;
-    }}
-
-    QCheckBox::indicator {{
-        width: 34px;
-        height: 18px;
-        border-radius: 9px;
-        background: {BORDER};
-        image: none;
-    }}
-
-    QCheckBox::indicator:checked {{
-        background: {accent};
     }}
 
     QScrollArea, QWidget#scrollContent {{

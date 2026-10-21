@@ -42,6 +42,8 @@ from ballistics import (
 
 from config import (
     DEFAULT_CONFIG,
+    DISTANCE_STEPS,
+    RANGES,
     config_dir,
     load_config,
     save_config
@@ -120,8 +122,6 @@ PRESETS = {
     },
 }
 
-DISTANCE_STEPS = [1, 5, 10, 25, 50, 100]
-
 
 def scrolled(widget, width=None):
     """Wrap a widget in a transparent vertical scroll area."""
@@ -172,6 +172,8 @@ class MainWindow(QMainWindow):
 
         self.last_solution = None
 
+        self.current_steps = []
+
         self.browser = None
 
         self.overlay = Overlay(
@@ -192,8 +194,6 @@ class MainWindow(QMainWindow):
             lambda: self.calculate(show_errors=False)
         )
 
-        setup_hotkeys(self)
-
         self.setWindowTitle("Squad Ballistics")
 
         icon_path = resource_path("assets/icon.ico")
@@ -209,6 +209,9 @@ class MainWindow(QMainWindow):
             self.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
 
         self.build_ui()
+
+        # Only after the UI exists: a hotkey may fire right away.
+        setup_hotkeys(self)
 
     # =========================
     # LAYOUT
@@ -357,11 +360,14 @@ class MainWindow(QMainWindow):
     def visible_weapons(self):
         show_mods = self.config["show_mods"]
 
-        return {
+        visible = {
             name: weapon
             for name, weapon in self.weapons.items()
             if show_mods or not weapon.mod
         }
+
+        # A database with only mod weapons still has to show something.
+        return visible or dict(self.weapons)
 
     def weapon_groups(self):
         groups = {}
@@ -680,6 +686,8 @@ class MainWindow(QMainWindow):
         self.note_label.setText("")
 
     def set_steps(self, steps):
+        self.current_steps = list(steps)
+
         # Detach the old rows right away; deleteLater alone would leave them
         # visible until the event loop runs.
         while self.steps_layout.count():
@@ -711,10 +719,7 @@ class MainWindow(QMainWindow):
             self.steps_layout.addWidget(row)
 
     def read_inputs(self):
-        try:
-            distance = self.distance_entry.value()
-        except ValueError:
-            raise ValueError(tr("bad_number", name=tr("distance")))
+        distance = self.distance_entry.value()
 
         if distance is None:
             raise ValueError(tr("enter_distance"))
@@ -722,17 +727,13 @@ class MainWindow(QMainWindow):
         if distance <= 0:
             raise ValueError(tr("bad_distance"))
 
-        try:
-            height = self.height_entry.value(0.0)
-        except ValueError:
-            raise ValueError(tr("bad_number", name=tr("height")))
+        height = self.height_entry.value(0.0)
 
-        try:
-            fov = self.fov_entry.value()
-        except ValueError:
-            fov = None
+        fov = self.fov_entry.value()
 
-        if fov is None or not 1 <= fov <= 179:
+        low, high = RANGES["fov"]
+
+        if fov is None or not low <= fov <= high:
             raise ValueError(tr("bad_fov"))
 
         return distance, height, fov
@@ -745,6 +746,13 @@ class MainWindow(QMainWindow):
 
         try:
             distance, height, fov = self.read_inputs()
+
+            solution = solve(
+                weapon,
+                distance,
+                height,
+                self.config["arc"]
+            )
         except ValueError as e:
             self.last_solution = None
 
@@ -762,20 +770,6 @@ class MainWindow(QMainWindow):
         if self.config["fov"] != fov:
             self.config["fov"] = fov
             self.schedule_save()
-
-        try:
-            solution = solve(
-                weapon,
-                distance,
-                height,
-                self.config["arc"]
-            )
-        except ValueError as e:
-            self.last_solution = None
-            self.overlay.reset_offset()
-            self.overlay.set_info("")
-            self.clear_result(str(e), error=True)
-            return
 
         self.last_solution = solution
 
@@ -813,12 +807,13 @@ class MainWindow(QMainWindow):
 
         offset = self.current_offset()
 
-        offscreen = abs(offset) > self.overlay.height() / 2
+        offscreen = self.overlay.is_offscreen(offset)
 
         self.overlay.set_offset(offset)
 
         self.overlay.set_info(
-            f"{solution.distance:.0f} m  ·  {format_angle(solution.angle, unit)}"
+            f"{solution.distance:.0f} {tr('unit_m')}  ·  "
+            f"{format_angle(solution.angle, unit)}"
         )
 
         self.set_big(format_angle(solution.angle, unit))
@@ -849,26 +844,23 @@ class MainWindow(QMainWindow):
         if weapon.aim == "elevation":
             alt = solution.alternatives.get(other_arc)
 
-        if alt is not None and abs(alt - solution.angle) > 0.01:
-            self.stats["stat_alt"].set(format_angle(alt, unit))
-        else:
-            self.stats["stat_alt"].set("—")
-
-        main_path = trajectory(weapon, solution)
+            if alt is not None and abs(alt - solution.angle) < 0.01:
+                alt = None
 
         alt_path = []
 
-        if alt is not None and abs(alt - solution.angle) > 0.01:
-            alt_solution = solve(
+        if alt is None:
+            self.stats["stat_alt"].set("—")
+        else:
+            self.stats["stat_alt"].set(format_angle(alt, unit))
+
+            alt_path = trajectory(
                 weapon,
-                solution.distance,
-                solution.height_diff,
-                other_arc
+                solve(weapon, solution.distance, solution.height_diff, other_arc)
             )
-            alt_path = trajectory(weapon, alt_solution)
 
         self.trajectory_view.set_data(
-            main_path,
+            trajectory(weapon, solution),
             alt_path,
             (solution.distance, solution.height_diff)
         )
@@ -881,10 +873,18 @@ class MainWindow(QMainWindow):
             if offscreen:
                 steps = [tr("how_overlay_offscreen", angle=angle_text)]
             else:
+                toggle_key = self.config["hotkeys"].get("toggle_overlay")
+
                 steps = [
                     tr("how_overlay_1", angle=angle_text),
                     tr("how_overlay_2", fov=f"{fov:g}")
                 ]
+
+                if toggle_key:
+                    steps[0] = (
+                        tr("how_overlay_on", hotkey=toggle_key)
+                        + " " + steps[0]
+                    )
 
             steps.append(
                 tr(
@@ -916,10 +916,6 @@ class MainWindow(QMainWindow):
             self.overlay.screen_width(),
             self.config["offset_scale"] / 100
         )
-
-    def apply_offset(self):
-        if self.last_solution is not None and self.last_solution.reachable:
-            self.overlay.set_offset(self.current_offset())
 
     def reset_offset(self):
         self.last_solution = None
@@ -973,14 +969,14 @@ class MainWindow(QMainWindow):
 
         settings_layout.addWidget(label(tr("size").upper(), "section"))
 
-        for text, key, low, high in [
-            ("sl_dot", "dot_size", 1, 20),
-            ("sl_length", "line_length", 1, 40),
-            ("sl_gap", "line_gap", 0, 30),
-            ("sl_thickness", "line_thickness", 1, 10),
-            ("sl_circle", "circle_radius", 5, 80),
+        for text, key in [
+            ("sl_dot", "dot_size"),
+            ("sl_length", "line_length"),
+            ("sl_gap", "line_gap"),
+            ("sl_thickness", "line_thickness"),
+            ("sl_circle", "circle_radius"),
         ]:
-            self.add_slider(settings_layout, tr(text), key, low, high)
+            self.add_slider(settings_layout, tr(text), key)
 
         settings_layout.addWidget(label(tr("effects").upper(), "section"))
 
@@ -992,9 +988,7 @@ class MainWindow(QMainWindow):
         ]:
             self.add_toggle(settings_layout, tr(text), key)
 
-        self.add_slider(
-            settings_layout, tr("sl_outline"), "outline_thickness", 1, 5
-        )
+        self.add_slider(settings_layout, tr("sl_outline"), "outline_thickness")
 
         outline_row = QHBoxLayout()
 
@@ -1047,18 +1041,18 @@ class MainWindow(QMainWindow):
 
         current_color = "#{:02x}{:02x}{:02x}".format(*self.config["color"])
 
-        swatches = Swatches(CROSSHAIR_COLORS, current_color)
+        self.color_swatches = Swatches(CROSSHAIR_COLORS, current_color)
 
-        swatches.picked.connect(self.pick_crosshair_color)
+        self.color_swatches.picked.connect(self.pick_crosshair_color)
 
-        side_layout.addWidget(swatches)
+        side_layout.addWidget(self.color_swatches)
 
         for index, name in enumerate(("R", "G", "B")):
             self.add_slider(
-                side_layout, name, ("color", index), 0, 255
+                side_layout, name, ("color", index), limits=(0, 255)
             )
 
-        self.add_slider(side_layout, tr("sl_opacity"), "opacity", 20, 255)
+        self.add_slider(side_layout, tr("sl_opacity"), "opacity")
 
         layout.addWidget(side, 1)
 
@@ -1081,8 +1075,10 @@ class MainWindow(QMainWindow):
 
         return toggle
 
-    def add_slider(self, layout, text, key, low, high, on_change=None,
+    def add_slider(self, layout, text, key, limits=None, on_change=None,
                    suffix=""):
+        low, high = limits or RANGES[key]
+
         row = SliderRow(text, low, high, self.get_setting(key), suffix)
 
         def handle(value):
@@ -1152,8 +1148,11 @@ class MainWindow(QMainWindow):
     def refresh_crosshair(self):
         self.overlay.update()
 
-        if hasattr(self, "preview"):
-            self.preview.update()
+        self.preview.update()
+
+        self.color_swatches.set_current(
+            "#{:02x}{:02x}{:02x}".format(*self.config["color"])
+        )
 
         self.schedule_save()
 
@@ -1281,7 +1280,7 @@ class MainWindow(QMainWindow):
             layout,
             tr("s_step"),
             self.combo(
-                [(step, f"{step} m") for step in DISTANCE_STEPS],
+                [(step, f"{step} {tr('unit_m')}") for step in DISTANCE_STEPS],
                 self.config["distance_step"],
                 self.set_distance_step
             )
@@ -1320,19 +1319,22 @@ class MainWindow(QMainWindow):
             self.combo(screens, self.config["monitor"], self.set_monitor)
         )
 
+        # Moving the center changes what counts as off-screen.
         self.add_slider(
-            layout, tr("s_offset_x"), "center_offset_x", -300, 300,
-            suffix=" px"
+            layout, tr("s_offset_x"), "center_offset_x",
+            on_change=self.recalculate_if_ready,
+            suffix=f" {tr('unit_px')}"
         )
 
         self.add_slider(
-            layout, tr("s_offset_y"), "center_offset_y", -300, 300,
-            suffix=" px"
+            layout, tr("s_offset_y"), "center_offset_y",
+            on_change=self.recalculate_if_ready,
+            suffix=f" {tr('unit_px')}"
         )
 
         self.add_slider(
-            layout, tr("s_calibration"), "offset_scale", 50, 150,
-            on_change=self.apply_offset, suffix="%"
+            layout, tr("s_calibration"), "offset_scale",
+            on_change=self.recalculate_if_ready, suffix="%"
         )
 
         return frame

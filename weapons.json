@@ -280,8 +280,8 @@
             45,
             88.875
         ],
-        "note": "Set the mils on the mortar sight. Range ~50–1230 m.",
-        "note_ru": "Выставьте милы на прицеле миномёта. Дальность ~50–1230 м."
+        "note": "Set the mils on the mortar sight. Range 51–1237 m.",
+        "note_ru": "Выставьте милы на прицеле миномёта. Дальность 51–1237 м."
     },
     "Technical Mortar": {
         "velocity": 110,

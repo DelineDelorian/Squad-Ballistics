@@ -105,7 +105,10 @@ Squad Ballistics предоставляет:
 4. Прямая наводка (гранатомёты, пушки): совместите метку оверлея с целью и стреляйте.
 5. Навесной огонь (миномёты, Hell Cannon, ракеты): выставьте показанный угол (милы или градусы) на орудии.
 
-Tips / Советы: the mouse wheel over a field changes the value (Shift ×0.1, Ctrl ×10). / Колесо мыши над полем меняет значение (Shift ×0.1, Ctrl ×10).
+Tips / Советы:
+
+* Both `.` and `,` work as the decimal separator on any keyboard layout; `-` anywhere in the height field flips the sign. / Дробную часть можно вводить через `.` или `,` в любой раскладке (на русской подойдут и клавиши «ю»/«б»); `-` в любом месте поля высоты меняет знак.
+* The mouse wheel over a field changes the value (Shift ×0.1, Ctrl ×10). / Колесо мыши над полем меняет значение (Shift ×0.1, Ctrl ×10).
 
 | Hotkey (default) | Action / Действие |
 |------------------|-------------------|
